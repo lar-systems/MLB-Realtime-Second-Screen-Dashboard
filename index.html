@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MLB Second-Screen Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=2026-04-02-15">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <img id="header-team-logo" class="brand-logo" alt="" hidden>
+        <h1 id="team-title">MLB Team Dashboard</h1>
+      </div>
+      <div class="controls">
+        <select id="team-select" class="header-select" aria-label="Select MLB team"></select>
+        <button id="cycle-mode-button" type="button">Cycle Mock Mode</button>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="hero-card">
+        <div class="hero-meta">
+          <p id="mode-label" class="mode-label">Pregame</p>
+          <p id="updated-clock" class="updated-clock">Local 00:00:00</p>
+          <p id="status-label" class="status-label">Awaiting first pitch</p>
+        </div>
+
+        <div class="score-strip">
+          <article class="score-side away">
+            <div class="score-side-main">
+              <img id="away-logo" class="team-logo" alt="" hidden>
+              <div class="score-side-text">
+                <p class="team-label">Away</p>
+                <h2 id="away-name">Opponent</h2>
+              </div>
+              <div id="away-score" class="score-value">0</div>
+            </div>
+            <div class="score-side-meta">
+              <div id="away-record" class="team-record"></div>
+              <div id="away-standing" class="team-standing"></div>
+            </div>
+            <div id="away-live-role" class="live-side-card" hidden>
+              <p id="away-live-role-label" class="live-side-label">At Bat</p>
+              <div class="live-side-player">
+                <img id="away-live-role-photo" class="live-side-photo" alt="" hidden>
+                <div>
+                  <div id="away-live-role-name" class="live-side-name">Player</div>
+                  <div id="away-live-role-meta" class="live-side-meta-text">Info</div>
+                </div>
+              </div>
+              <div id="away-live-role-stats" class="live-side-stats" hidden></div>
+            </div>
+          </article>
+
+          <div class="center-status">
+            <div id="bases-mini" class="bases-mini" aria-hidden="true">
+              <div class="base-dots">
+                <span class="base-dot"></span>
+                <span class="base-dot"></span>
+                <span class="base-dot"></span>
+              </div>
+              <span class="base-diamond">
+                <span class="base first"></span>
+                <span class="base second"></span>
+                <span class="base third"></span>
+                <span class="base home"></span>
+              </span>
+            </div>
+            <div id="center-state" class="center-state">Next Game</div>
+            <div id="countdown" class="countdown">00:00:00</div>
+            <div id="count-state" class="count-state">B 0 | S 0 | O 0</div>
+          </div>
+
+          <article class="score-side home">
+            <div class="score-side-main home-main">
+              <div class="score-side-text">
+                <p class="team-label">Home</p>
+                <h2 id="home-name">Selected Team</h2>
+              </div>
+              <div id="home-score" class="score-value">0</div>
+              <img id="home-logo" class="team-logo" alt="" hidden>
+            </div>
+            <div class="score-side-meta">
+              <div id="home-record" class="team-record"></div>
+              <div id="home-standing" class="team-standing"></div>
+            </div>
+            <div id="home-live-role" class="live-side-card" hidden>
+              <p id="home-live-role-label" class="live-side-label">Pitching</p>
+              <div class="live-side-player">
+                <img id="home-live-role-photo" class="live-side-photo" alt="" hidden>
+                <div>
+                  <div id="home-live-role-name" class="live-side-name">Player</div>
+                  <div id="home-live-role-meta" class="live-side-meta-text">Info</div>
+                </div>
+              </div>
+              <div id="home-live-role-stats" class="live-side-stats" hidden></div>
+            </div>
+          </article>
+        </div>
+
+        <div id="hero-footer" class="hero-footer">
+          <div>
+            <p id="footer-slot-1-label" class="meta-label">Venue</p>
+            <p id="footer-slot-1-value" class="meta-value">TBD</p>
+          </div>
+          <div>
+            <p id="footer-slot-2-label" class="meta-label">First Pitch</p>
+            <p id="footer-slot-2-value" class="meta-value">TBD</p>
+          </div>
+          <div>
+            <p id="footer-slot-3-label" class="meta-label">Matchup</p>
+            <p id="footer-slot-3-value" class="meta-value">TBD</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="matchup-grid" class="matchup-grid">
+        <article class="player-card">
+          <p id="left-card-label" class="section-label">Current Batter</p>
+          <div class="player-header">
+            <img id="batter-photo" class="player-photo" alt="" hidden>
+            <div>
+              <h3 id="batter-name">No batter yet</h3>
+              <p id="batter-meta" class="player-meta">Waiting for live game data</p>
+            </div>
+          </div>
+          <div id="batter-line" class="player-stats">Stat line unavailable</div>
+        </article>
+
+        <article class="player-card">
+          <p id="right-card-label" class="section-label">Current Pitcher</p>
+          <div class="player-header">
+            <img id="pitcher-photo" class="player-photo" alt="" hidden>
+            <div>
+              <h3 id="pitcher-name">No pitcher yet</h3>
+              <p id="pitcher-meta" class="player-meta">Waiting for live game data</p>
+            </div>
+          </div>
+          <div id="pitcher-line" class="player-stats">Stat line unavailable</div>
+        </article>
+      </section>
+
+      <section id="details-grid" class="details-grid">
+        <article class="panel linescore-panel">
+          <div class="panel-header">
+            <p class="section-label">Linescore</p>
+          </div>
+          <div id="linescore" class="linescore"></div>
+        </article>
+
+        <article class="panel notes-panel">
+          <div class="panel-header">
+            <p class="section-label">Game Notes</p>
+          </div>
+          <p id="recent-play" class="recent-play">Live event summary will appear here.</p>
+          <div class="probable-pitchers">
+            <div>
+              <p class="meta-label">Team Probable</p>
+              <p id="team-probable" class="meta-value">TBD</p>
+            </div>
+            <div>
+              <p class="meta-label">Opponent Probable</p>
+              <p id="opponent-probable" class="meta-value">TBD</p>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel debug-panel">
+        <div class="panel-header">
+          <p class="section-label">API Status</p>
+        </div>
+        <section id="status-banner" class="status-banner status-banner-inline" aria-live="polite"></section>
+
+        <div class="panel-header">
+          <p class="section-label">Debug</p>
+        </div>
+        <pre id="debug-output" class="debug-output">Waiting for normalized state...</pre>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js?v=2026-04-02-7" type="module"></script>
+</body>
+</html>
