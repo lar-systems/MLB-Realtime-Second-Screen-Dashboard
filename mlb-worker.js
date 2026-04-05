@@ -1,13 +1,26 @@
+/*
+ * Worker-side MLB data controller.
+ *
+ * This file is responsible for everything that requires interpretation of MLB
+ * data:
+ * - polling cadence
+ * - choosing the relevant game
+ * - classifying that game as pregame / live / final
+ * - normalizing MLB payloads into one UI-friendly state contract
+ * - falling back when `feed/live` is missing or incomplete
+ */
+
 const API_BASE = "https://statsapi.mlb.com/api/v1";
+const API_BASE_LIVE = "https://statsapi.mlb.com/api/v1.1";
 const SPORT_ID = 1;
 const FINAL_MODE_HOLD_MS = 3 * 60 * 60 * 1000;
-const SCHEDULE_LOOKBACK_DAYS = 1;
+const SCHEDULE_LOOKBACK_DAYS = 7;
 const SCHEDULE_LOOKAHEAD_DAYS = 7;
 
 const POLL_INTERVALS = {
   pregame: 300000,
   nearFirstPitch: 60000,
-  live: 5000,
+  live: 3000,
   final: 60000,
   error: 30000,
 };
@@ -20,6 +33,8 @@ const workerState = {
   lastKnownState: null,
   mockModeIndex: 0,
 };
+
+// The main thread only sends user intent. The worker owns polling and state.
 
 self.addEventListener("message", (event) => {
   const message = event.data;
@@ -58,6 +73,8 @@ self.addEventListener("message", (event) => {
   }
 });
 
+// One polling loop controls fetch, fallback handling, stale-state recovery,
+// and scheduling the next poll.
 async function pollNow() {
   clearScheduledPoll();
 
@@ -98,6 +115,11 @@ async function pollNow() {
   }
 }
 
+// Selection order matters. Prefer:
+// 1. active live game
+// 2. pregame-like game, including delayed/postponed states
+// 3. next upcoming game
+// 4. recent final
 async function fetchDashboardState() {
   if (workerState.useMockData || workerState.mockModeForced) {
     return buildWorkerMockState(workerState.teamId, "Mock mode active.");
@@ -112,21 +134,28 @@ async function fetchDashboardState() {
   const pregameLikeGame = relevantGames.find(isPregameCandidate);
   const upcomingGame = relevantGames.find(isUpcomingGame);
   const recentFinal = findRecentFinalGame(relevantGames);
+  const scheduleAnchorGame = pregameLikeGame || upcomingGame;
+  const previousCompletedGame = findPreviousCompletedGame(relevantGames, scheduleAnchorGame);
+  const upcomingSchedule = buildUpcomingSchedule(relevantGames, scheduleAnchorGame);
 
   if (liveGame) {
     const liveFeed = await fetchLiveFeed(liveGame.gamePk, { allowNotFound: true });
     if (liveFeed) {
       return normalizeLiveState(liveFeed);
     }
+    const partialLive = await fetchPartialLiveResources(liveGame.gamePk);
+    if (hasPartialLiveResources(partialLive)) {
+      return normalizePartialLiveState(liveGame, partialLive);
+    }
     return normalizeScheduleLiveFallback(liveGame);
   }
 
   if (pregameLikeGame) {
-    return normalizePregameState(pregameLikeGame);
+    return normalizePregameState(pregameLikeGame, previousCompletedGame, upcomingSchedule);
   }
 
   if (upcomingGame) {
-    return normalizePregameState(upcomingGame);
+    return normalizePregameState(upcomingGame, previousCompletedGame, upcomingSchedule);
   }
 
   if (recentFinal) {
@@ -140,6 +169,8 @@ async function fetchDashboardState() {
   return buildNoGameState(workerState.teamId);
 }
 
+// The schedule window is wider than "today" so the dashboard can still show a
+// useful previous final and upcoming context around off days.
 async function fetchRelevantSchedule(teamId) {
   const today = new Date();
   const startDate = addDays(today, -SCHEDULE_LOOKBACK_DAYS);
@@ -160,8 +191,32 @@ async function fetchRelevantSchedule(teamId) {
     .sort((left, right) => new Date(left.gameDate).getTime() - new Date(right.gameDate).getTime());
 }
 
+// `feed/live` is the preferred path, but MLB does not expose it reliably for
+// every gamePk. The partial-resource fallbacks below exist for that reason.
 async function fetchLiveFeed(gamePk, options = {}) {
-  return fetchJson(`${API_BASE}/game/${gamePk}/feed/live`, options);
+  return fetchJson(`${API_BASE_LIVE}/game/${gamePk}/feed/live`, options);
+}
+
+async function fetchGameBoxscore(gamePk, options = {}) {
+  return fetchJson(`${API_BASE}/game/${gamePk}/boxscore`, options);
+}
+
+async function fetchGameLinescore(gamePk, options = {}) {
+  return fetchJson(`${API_BASE}/game/${gamePk}/linescore`, options);
+}
+
+async function fetchGamePlayByPlay(gamePk, options = {}) {
+  return fetchJson(`${API_BASE}/game/${gamePk}/playByPlay`, options);
+}
+
+async function fetchPartialLiveResources(gamePk) {
+  const [boxscore, linescore, playByPlay] = await Promise.all([
+    fetchGameBoxscore(gamePk, { allowNotFound: true }).catch(() => null),
+    fetchGameLinescore(gamePk, { allowNotFound: true }).catch(() => null),
+    fetchGamePlayByPlay(gamePk, { allowNotFound: true }).catch(() => null),
+  ]);
+
+  return { boxscore, linescore, playByPlay };
 }
 
 async function fetchJson(url, options = {}) {
@@ -180,7 +235,9 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
-async function normalizePregameState(game) {
+// Pregame packages together the next game, the previous completed game, and a
+// compact forward schedule so the lower row can stay useful before first pitch.
+async function normalizePregameState(game, previousGame = null, upcomingSchedule = []) {
   const teamEntry = getSelectedTeamEntry(game);
   const opponentEntry = getOpponentTeamEntry(game);
   const startTime = game?.gameDate || null;
@@ -206,6 +263,8 @@ async function normalizePregameState(game) {
       countdownTargetMs: startTime ? new Date(startTime).getTime() : null,
       probablePitchers,
     },
+    upcomingSchedule: upcomingSchedule.map(normalizeUpcomingScheduleItem),
+    previousGame: normalizePreviousGame(previousGame),
     live: null,
     final: null,
     meta: {
@@ -216,6 +275,8 @@ async function normalizePregameState(game) {
   };
 }
 
+// Full live normalization is the richest path and should be the first place to
+// check when a displayed baseball value looks wrong.
 function normalizeLiveState(feed) {
   const gameData = feed?.gameData || {};
   const liveData = feed?.liveData || {};
@@ -232,12 +293,15 @@ function normalizeLiveState(feed) {
     mode: "live",
     team,
     nextGame: null,
-    live: {
-      gamePk: gameData?.game?.pk || gameData?.gamePk,
-      status: gameData?.status?.detailedState || "In Progress",
-      away: {
-        ...awayTeam,
-        score: linescore?.teams?.away?.runs ?? 0,
+    upcomingSchedule: [],
+    previousGame: null,
+      live: {
+        gamePk: gameData?.game?.pk || gameData?.gamePk,
+        status: gameData?.status?.detailedState || "In Progress",
+        startTime: gameData?.datetime?.dateTime || gameData?.gameDate || null,
+        away: {
+          ...awayTeam,
+          score: linescore?.teams?.away?.runs ?? 0,
         hits: linescore?.teams?.away?.hits ?? null,
         errors: linescore?.teams?.away?.errors ?? null,
       },
@@ -259,6 +323,7 @@ function normalizeLiveState(feed) {
       },
       batter,
       pitcher,
+      celebration: buildLiveCelebration(currentPlay, batter, pitcher),
       linescore: normalizeLinescore(linescore?.innings),
       recentPlay: currentPlay?.result?.description || getLastPlayDescription(liveData?.plays?.allPlays),
       updatedAt: Date.now(),
@@ -283,6 +348,8 @@ async function normalizeFinalState(feed, upcomingGame) {
     mode: "final",
     team,
     nextGame: nextGame?.nextGame || null,
+    upcomingSchedule: [],
+    previousGame: null,
     live: null,
     final: {
       gamePk: gameData?.game?.pk || gameData?.gamePk,
@@ -298,18 +365,27 @@ async function normalizeFinalState(feed, upcomingGame) {
   };
 }
 
-function normalizeScheduleLiveFallback(game) {
+// Partial live normalization accepts an incomplete picture when MLB exposes
+// some game resources but not the full live feed.
+function normalizePartialLiveState(game, resources) {
   const teamEntry = getSelectedTeamEntry(game);
-  const opponentEntry = getOpponentTeamEntry(game);
-  const linescore = game?.linescore || {};
+  const linescore = resources?.linescore || game?.linescore || {};
+  const currentPlay = resources?.playByPlay?.currentPlay || getLastPlay(resources?.playByPlay?.allPlays);
+  const boxscorePlayers = buildPlayerLookup(resources?.boxscore);
+  const batter = normalizeBatter(currentPlay, boxscorePlayers);
+  const pitcher = normalizePitcher(currentPlay, boxscorePlayers);
+  const availableResources = describePartialLiveResources(resources);
 
   return {
     mode: "live",
     team: normalizeTeamIdentity(teamEntry?.team),
     nextGame: null,
+    upcomingSchedule: [],
+    previousGame: null,
     live: {
       gamePk: game?.gamePk,
       status: game?.status?.detailedState || "In Progress",
+      startTime: game?.gameDate || null,
       away: {
         ...normalizeTeamIdentity(game?.teams?.away?.team),
         score: game?.teams?.away?.score ?? linescore?.teams?.away?.runs ?? 0,
@@ -324,23 +400,71 @@ function normalizeScheduleLiveFallback(game) {
       },
       inning: linescore?.currentInning ?? 0,
       inningHalf: linescore?.inningHalf || null,
-      outs: linescore?.outs ?? 0,
-      balls: 0,
-      strikes: 0,
-      bases: {
-        first: Boolean(linescore?.offense?.first),
-        second: Boolean(linescore?.offense?.second),
-        third: Boolean(linescore?.offense?.third),
-      },
-      batter: null,
-      pitcher: null,
+      outs: currentPlay?.count?.outs ?? linescore?.outs ?? 0,
+      balls: currentPlay?.count?.balls ?? linescore?.balls ?? 0,
+      strikes: currentPlay?.count?.strikes ?? linescore?.strikes ?? 0,
+      bases: normalizeBases(linescore, currentPlay),
+      batter,
+      pitcher,
+      celebration: buildLiveCelebration(currentPlay, batter, pitcher),
       linescore: normalizeLinescore(linescore?.innings),
-      recentPlay: "Live feed unavailable for this gamePk. Showing schedule-level linescore only.",
+      recentPlay: currentPlay?.result?.description || getLastPlayDescription(resources?.playByPlay?.allPlays) || "Showing partial live game data.",
       updatedAt: Date.now(),
     },
     final: null,
     meta: {
-      sourceStatus: "Schedule fallback active because MLB feed/live returned 404.",
+      sourceStatus: `Live fallback using MLB ${availableResources} because feed/live was unavailable.`,
+      lastSuccessfulUpdate: Date.now(),
+      lastError: null,
+    },
+  };
+}
+
+// Schedule-level live fallback is the final safety net when richer resources
+// are missing for a game that is clearly in progress.
+function normalizeScheduleLiveFallback(game) {
+  const teamEntry = getSelectedTeamEntry(game);
+  const opponentEntry = getOpponentTeamEntry(game);
+  const linescore = game?.linescore || {};
+
+  return {
+    mode: "live",
+    team: normalizeTeamIdentity(teamEntry?.team),
+    nextGame: null,
+    upcomingSchedule: [],
+    previousGame: null,
+      live: {
+        gamePk: game?.gamePk,
+        status: game?.status?.detailedState || "In Progress",
+        startTime: game?.gameDate || null,
+        away: {
+          ...normalizeTeamIdentity(game?.teams?.away?.team),
+          score: game?.teams?.away?.score ?? linescore?.teams?.away?.runs ?? 0,
+        hits: linescore?.teams?.away?.hits ?? null,
+        errors: linescore?.teams?.away?.errors ?? null,
+      },
+      home: {
+        ...normalizeTeamIdentity(game?.teams?.home?.team),
+        score: game?.teams?.home?.score ?? linescore?.teams?.home?.runs ?? 0,
+        hits: linescore?.teams?.home?.hits ?? null,
+        errors: linescore?.teams?.home?.errors ?? null,
+      },
+      inning: linescore?.currentInning ?? 0,
+      inningHalf: linescore?.inningHalf || null,
+      outs: linescore?.outs ?? 0,
+      balls: 0,
+      strikes: 0,
+      bases: normalizeBases(linescore, null),
+      batter: null,
+      pitcher: null,
+      celebration: null,
+      linescore: normalizeLinescore(linescore?.innings),
+      recentPlay: "Live feed and partial game endpoints were unavailable. Showing schedule-level linescore only.",
+      updatedAt: Date.now(),
+    },
+    final: null,
+    meta: {
+      sourceStatus: "Schedule fallback active because feed/live and partial live endpoints were unavailable.",
       lastSuccessfulUpdate: Date.now(),
       lastError: null,
     },
@@ -356,6 +480,8 @@ async function normalizeScheduleFinalFallback(game, upcomingGame) {
     mode: "final",
     team: normalizeTeamIdentity(teamEntry?.team),
     nextGame: nextGame?.nextGame || null,
+    upcomingSchedule: [],
+    previousGame: null,
     live: null,
     final: {
       gamePk: game?.gamePk,
@@ -501,6 +627,8 @@ function buildNoGameState(teamId) {
         opponent: null,
       },
     },
+    upcomingSchedule: [],
+    previousGame: null,
     live: null,
     final: null,
     meta: {
@@ -520,6 +648,21 @@ function normalizeTeamIdentity(team) {
   };
 }
 
+function normalizeUpcomingScheduleItem(game) {
+  const teamEntry = getSelectedTeamEntry(game);
+  const opponentEntry = getOpponentTeamEntry(game);
+
+  return {
+    gamePk: game?.gamePk ?? null,
+    startTime: game?.gameDate || null,
+    statusText: game?.status?.detailedState || game?.status?.abstractGameState || null,
+    isHome: Boolean(teamEntry?.isHome),
+    opponentName: opponentEntry?.team?.name || "Opponent",
+    opponentAbbr: opponentEntry?.team?.abbreviation || opponentEntry?.team?.abbrev || "",
+    opponentLogoUrl: teamLogoUrl(opponentEntry?.team?.id),
+  };
+}
+
 function normalizeLinescore(innings) {
   if (!Array.isArray(innings)) {
     return [];
@@ -530,6 +673,56 @@ function normalizeLinescore(innings) {
     away: inning?.away?.runs ?? null,
     home: inning?.home?.runs ?? null,
   }));
+}
+
+// Runner occupancy can come from different payload shapes depending on whether
+// we are in the full-feed path or a partial-live fallback path.
+function normalizeBases(linescore, currentPlay) {
+  return {
+    first: Boolean(linescore?.offense?.first || currentPlay?.matchup?.postOnFirst),
+    second: Boolean(linescore?.offense?.second || currentPlay?.matchup?.postOnSecond),
+    third: Boolean(linescore?.offense?.third || currentPlay?.matchup?.postOnThird),
+  };
+}
+
+function hasPartialLiveResources(resources) {
+  return Boolean(resources?.boxscore || resources?.linescore || resources?.playByPlay);
+}
+
+function describePartialLiveResources(resources) {
+  const labels = [];
+
+  if (resources?.boxscore) {
+    labels.push("boxscore");
+  }
+  if (resources?.linescore) {
+    labels.push("linescore");
+  }
+  if (resources?.playByPlay) {
+    labels.push("playByPlay");
+  }
+
+  return labels.length ? labels.join(", ") : "schedule";
+}
+
+function normalizePreviousGame(game) {
+  if (!game) {
+    return null;
+  }
+
+  return {
+    gamePk: game?.gamePk,
+    status: game?.status?.detailedState || game?.status?.abstractGameState || "Final",
+    away: normalizeTeamIdentity(game?.teams?.away?.team),
+    home: normalizeTeamIdentity(game?.teams?.home?.team),
+    awayScore: game?.teams?.away?.score ?? game?.linescore?.teams?.away?.runs ?? null,
+    awayHits: game?.linescore?.teams?.away?.hits ?? null,
+    awayErrors: game?.linescore?.teams?.away?.errors ?? null,
+    homeScore: game?.teams?.home?.score ?? game?.linescore?.teams?.home?.runs ?? null,
+    homeHits: game?.linescore?.teams?.home?.hits ?? null,
+    homeErrors: game?.linescore?.teams?.home?.errors ?? null,
+    linescore: normalizeLinescore(game?.linescore?.innings),
+  };
 }
 
 function normalizeBatter(currentPlay, playerLookup) {
@@ -546,6 +739,7 @@ function normalizeBatter(currentPlay, playerLookup) {
     bats: currentPlay?.matchup?.batSide?.code || null,
     position: player?.position?.abbreviation || null,
     todayLine: player?.stats?.batting?.summary || null,
+    gameStats: extractGameBattingStats(player?.stats?.batting),
     seasonStats: extractSeasonBattingStats(player?.seasonStats?.batting),
     seasonLine: buildSeasonBattingLine(player?.seasonStats?.batting),
   };
@@ -565,6 +759,7 @@ function normalizePitcher(currentPlay, playerLookup) {
     throws: currentPlay?.matchup?.pitchHand?.code || null,
     pitchCount: player?.stats?.pitching?.numberOfPitches ?? null,
     todayLine: player?.stats?.pitching?.summary || null,
+    gameStats: extractGamePitchingStats(player?.stats?.pitching),
     seasonStats: extractSeasonPitchingStats(player?.seasonStats?.pitching),
     seasonLine: buildSeasonPitchingLine(player?.seasonStats?.pitching),
   };
@@ -628,6 +823,19 @@ function extractSeasonBattingStats(stats) {
   };
 }
 
+function extractGameBattingStats(stats) {
+  if (!stats) {
+    return null;
+  }
+
+  return {
+    hits: stats.hits ?? null,
+    runs: stats.runs ?? null,
+    rbi: stats.rbi ?? null,
+    walks: stats.baseOnBalls ?? null,
+  };
+}
+
 function buildSeasonPitchingLine(stats) {
   if (!stats) {
     return null;
@@ -663,6 +871,123 @@ function extractSeasonPitchingStats(stats) {
   };
 }
 
+function extractGamePitchingStats(stats) {
+  if (!stats) {
+    return null;
+  }
+
+  return {
+    strikeouts: stats.strikeOuts ?? null,
+  };
+}
+
+function buildLiveCelebration(currentPlay, batter, pitcher) {
+  if (!currentPlay?.result) {
+    return null;
+  }
+
+  const eventType = normalizeCelebrationEventType(
+    currentPlay?.result?.eventType ||
+    currentPlay?.result?.event ||
+    currentPlay?.result?.type
+  );
+  const celebrationId = String(
+    currentPlay?.playId ||
+    currentPlay?.atBatIndex ||
+    currentPlay?.about?.atBatIndex ||
+    `${eventType}-${currentPlay?.result?.description || "play"}`
+  );
+  const rbi = Number(currentPlay?.result?.rbi || 0);
+  const runsScored = countRunsScored(currentPlay);
+
+  if (isStrikeoutCelebration(eventType) && pitcher?.name) {
+    return {
+      id: `${celebrationId}:strikeout`,
+      label: "STRIKEOUT",
+      detail: buildCelebrationDetail("strikeout", pitcher?.gameStats?.strikeouts),
+      actor: pitcher.name,
+      tone: "pitcher",
+    };
+  }
+
+  if (rbi > 0 && batter?.name) {
+    return {
+      id: `${celebrationId}:rbi`,
+      label: "RBI",
+      detail: buildCelebrationDetail("rbi", batter?.gameStats?.rbi ?? rbi),
+      actor: batter.name,
+      tone: "batter",
+    };
+  }
+
+  if (runsScored > 0 && batter?.name) {
+    return {
+      id: `${celebrationId}:run`,
+      label: "RUN",
+      detail: buildCelebrationDetail("run", batter?.gameStats?.runs ?? runsScored),
+      actor: batter.name,
+      tone: "batter",
+    };
+  }
+
+  if (isWalkCelebration(eventType) && batter?.name) {
+    return {
+      id: `${celebrationId}:walk`,
+      label: "WALK",
+      detail: buildCelebrationDetail("walk", batter?.gameStats?.walks),
+      actor: batter.name,
+      tone: "batter",
+    };
+  }
+
+  if (isHitCelebration(eventType) && batter?.name) {
+    return {
+      id: `${celebrationId}:hit`,
+      label: "HIT",
+      detail: buildCelebrationDetail("hit", batter?.gameStats?.hits),
+      actor: batter.name,
+      tone: "batter",
+    };
+  }
+
+  return null;
+}
+
+function normalizeCelebrationEventType(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll(" ", "_")
+    .replaceAll("-", "_");
+}
+
+function isHitCelebration(eventType) {
+  return ["single", "double", "triple", "home_run"].includes(eventType);
+}
+
+function isWalkCelebration(eventType) {
+  return ["walk", "intent_walk"].includes(eventType);
+}
+
+function isStrikeoutCelebration(eventType) {
+  return eventType.includes("strikeout") || eventType.includes("strike_out");
+}
+
+function countRunsScored(currentPlay) {
+  const runners = Array.isArray(currentPlay?.runners) ? currentPlay.runners : [];
+  return runners.filter((runner) => {
+    const end = String(runner?.movement?.end || "").toLowerCase();
+    return end === "score";
+  }).length;
+}
+
+function buildCelebrationDetail(label, count) {
+  if (count && Number.isFinite(Number(count))) {
+    return `${ordinal(Number(count))} ${label}`;
+  }
+  return label;
+}
+
 function buildFinalSummary(gameData, liveData) {
   const away = gameData?.teams?.away?.name || "Away";
   const home = gameData?.teams?.home?.name || "Home";
@@ -693,6 +1018,8 @@ function getSelectedFeedTeam(gameData) {
   return gameData?.teams?.home;
 }
 
+// These classifiers intentionally keep postponed / delayed / suspended games in
+// the pregame lane instead of letting them slip into a misleading "final".
 function isLiveGame(game) {
   const abstractState = game?.status?.abstractGameState;
   const codedState = game?.status?.codedGameState;
@@ -752,6 +1079,46 @@ function findRecentFinalGame(games) {
 
   const endedAt = new Date(recent.gameDate).getTime();
   return Date.now() - endedAt <= FINAL_MODE_HOLD_MS ? recent : null;
+}
+
+function findPreviousCompletedGame(games, referenceGame = null) {
+  const referenceTime = referenceGame?.gameDate
+    ? new Date(referenceGame.gameDate).getTime()
+    : Number.POSITIVE_INFINITY;
+
+  return games
+    .filter((game) => {
+      if (!isFinalGame(game)) {
+        return false;
+      }
+
+      const gameTime = new Date(game?.gameDate || 0).getTime();
+      return Number.isFinite(gameTime) && gameTime < referenceTime;
+    })
+    .sort((left, right) => new Date(right.gameDate).getTime() - new Date(left.gameDate).getTime())[0] || null;
+}
+
+function buildUpcomingSchedule(games, referenceGame = null) {
+  const referenceGamePk = referenceGame?.gamePk ?? null;
+  const referenceTime = referenceGame?.gameDate
+    ? new Date(referenceGame.gameDate).getTime()
+    : Date.now();
+
+  return games
+    .filter((game) => {
+      if (isLiveGame(game) || isFinalGame(game)) {
+        return false;
+      }
+
+      const gameTime = new Date(game?.gameDate || 0).getTime();
+      if (!Number.isFinite(gameTime)) {
+        return false;
+      }
+
+      return game?.gamePk === referenceGamePk || gameTime >= referenceTime;
+    })
+    .sort((left, right) => new Date(left.gameDate).getTime() - new Date(right.gameDate).getTime())
+    .slice(0, 6);
 }
 
 function getLastPlay(allPlays) {
@@ -893,6 +1260,8 @@ function teamIdentityFromId(teamId) {
   return teams[teamId] || { id: teamId, name: "Selected Team", abbr: "" };
 }
 
+// Mock states mirror the real normalized contract on purpose. UI work should
+// not need a separate render path just because the data is mocked.
 function buildWorkerMockState(teamId, errorMessage) {
   const team = teamIdentityFromId(teamId);
   const phase = workerState.mockModeIndex;
@@ -942,6 +1311,64 @@ function buildWorkerMockState(teamId, errorMessage) {
           },
         },
       },
+      upcomingSchedule: [
+        {
+          gamePk: 2001,
+          startTime: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
+          statusText: "Scheduled",
+          isHome: true,
+          opponentName: "Seattle Mariners",
+          opponentAbbr: "SEA",
+          opponentLogoUrl: teamLogoUrl(136),
+        },
+        {
+          gamePk: 2004,
+          startTime: new Date(Date.now() + 26 * 60 * 60 * 1000).toISOString(),
+          statusText: "Scheduled",
+          isHome: true,
+          opponentName: "Seattle Mariners",
+          opponentAbbr: "SEA",
+          opponentLogoUrl: teamLogoUrl(136),
+        },
+        {
+          gamePk: 2005,
+          startTime: new Date(Date.now() + 50 * 60 * 60 * 1000).toISOString(),
+          statusText: "Scheduled",
+          isHome: false,
+          opponentName: "Boston Red Sox",
+          opponentAbbr: "BOS",
+          opponentLogoUrl: teamLogoUrl(111),
+        },
+        {
+          gamePk: 2006,
+          startTime: new Date(Date.now() + 74 * 60 * 60 * 1000).toISOString(),
+          statusText: "Scheduled",
+          isHome: false,
+          opponentName: "Boston Red Sox",
+          opponentAbbr: "BOS",
+          opponentLogoUrl: teamLogoUrl(111),
+        },
+      ],
+      previousGame: {
+        gamePk: 1999,
+        status: "Final",
+        away: { id: 136, name: "Seattle Mariners", abbr: "SEA", logoUrl: teamLogoUrl(136) },
+        home: { id: team.id, name: team.name, abbr: team.abbr, logoUrl: teamLogoUrl(team.id) },
+        awayScore: 2,
+        awayHits: 8,
+        awayErrors: 0,
+        homeScore: 4,
+        homeHits: 9,
+        homeErrors: 0,
+        linescore: [
+          { inning: 1, away: 0, home: 1 },
+          { inning: 2, away: 1, home: 0 },
+          { inning: 3, away: 0, home: 1 },
+          { inning: 4, away: 0, home: 1 },
+          { inning: 5, away: 1, home: 0 },
+          { inning: 6, away: 0, home: 1 },
+        ],
+      },
       live: null,
       final: null,
       meta: {
@@ -957,11 +1384,14 @@ function buildWorkerMockState(teamId, errorMessage) {
       mode: "live",
       team,
       nextGame: null,
-      live: {
-        gamePk: 2002,
-        status: "In Progress",
-        away: { id: 136, name: "Seattle Mariners", abbr: "SEA", score: 2, logoUrl: teamLogoUrl(136) },
-        home: { id: team.id, name: team.name, abbr: team.abbr, score: 4, logoUrl: teamLogoUrl(team.id) },
+      upcomingSchedule: [],
+      previousGame: null,
+        live: {
+          gamePk: 2002,
+          status: "In Progress",
+          startTime: new Date(Date.now() - ((2 * 60 + 14) * 60 * 1000)).toISOString(),
+          away: { id: 136, name: "Seattle Mariners", abbr: "SEA", score: 2, logoUrl: teamLogoUrl(136) },
+          home: { id: team.id, name: team.name, abbr: team.abbr, score: 4, logoUrl: teamLogoUrl(team.id) },
         inning: 6,
         inningHalf: "Bottom",
         outs: 2,
@@ -975,6 +1405,12 @@ function buildWorkerMockState(teamId, errorMessage) {
           bats: "R",
           position: "CF",
           todayLine: "1-2, BB",
+          gameStats: {
+            hits: 2,
+            runs: 1,
+            rbi: 2,
+            walks: 1,
+          },
           seasonStats: {
             average: ".281",
             onBase: ".353",
@@ -992,12 +1428,22 @@ function buildWorkerMockState(teamId, errorMessage) {
           throws: "L",
           pitchCount: 71,
           todayLine: "5.2 IP, 2 ER",
+          gameStats: {
+            strikeouts: 7,
+          },
           seasonStats: {
             era: "3.40",
             whip: "1.20",
             strikeouts: 44,
           },
           seasonLine: "3.40 ERA / 1.20 WHIP",
+        },
+        celebration: {
+          id: "mock-live-rbi-6",
+          label: "RBI",
+          detail: "2nd rbi",
+          actor: "Current Batter",
+          tone: "batter",
         },
         linescore: [
           { inning: 1, away: 0, home: 1 },
@@ -1063,6 +1509,8 @@ function buildWorkerMockState(teamId, errorMessage) {
         },
       },
     },
+    upcomingSchedule: [],
+    previousGame: null,
     live: null,
     final: {
       gamePk: 2002,

@@ -1,3 +1,4 @@
+/* Theme tokens and global defaults */
 :root {
   --bg: #07111f;
   --panel: rgba(10, 23, 42, 0.86);
@@ -20,6 +21,10 @@
   display: none !important;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -31,6 +36,7 @@ body {
     linear-gradient(145deg, #02060b 0%, #07111f 48%, #0b1b31 100%);
 }
 
+/* Shared shell layout */
 button,
 select {
   font: inherit;
@@ -135,7 +141,7 @@ select {
 .header-select,
 #cycle-mode-button {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 4px;
   padding: 8px 12px;
   color: var(--text);
   background: var(--panel);
@@ -156,7 +162,7 @@ select {
   margin-bottom: 0;
   padding: 10px 14px;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 4px;
   background: rgba(8, 16, 31, 0.35);
   color: var(--muted);
   font-size: 0.95rem;
@@ -176,16 +182,18 @@ select {
   flex-direction: column;
 }
 
+/* Core surfaces */
 .hero-card,
 .player-card,
 .panel {
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 4px;
   background: var(--panel);
   box-shadow: var(--shadow);
 }
 
 .hero-card {
+  position: relative;
   padding: 20px;
 }
 
@@ -215,11 +223,92 @@ select {
   text-shadow: var(--text-shadow-soft);
 }
 
+/* Hero scoreboard layout */
+.celebration-modal {
+  position: absolute;
+  inset: 58px 22px 22px;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px) scale(0.98);
+  transition: opacity 320ms ease, transform 320ms ease;
+  z-index: 6;
+}
+
+.celebration-modal.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.celebration-modal.is-exiting {
+  opacity: 0;
+  transform: translateY(-8px) scale(1.02);
+}
+
+.celebration-card {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-width: min(100%, 520px);
+  padding: 18px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgba(7, 17, 31, 0.76), rgba(7, 17, 31, 0.9)),
+    rgba(10, 23, 42, 0.84);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(18px) saturate(135%);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  text-align: center;
+}
+
+.celebration-card.is-pitcher {
+  border-color: rgba(93, 211, 158, 0.28);
+}
+
+.celebration-card.is-batter {
+  border-color: rgba(255, 183, 3, 0.28);
+}
+
+.celebration-label,
+.celebration-detail,
+.celebration-actor {
+  margin: 0;
+}
+
+.celebration-label {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: clamp(3rem, 8vw, 5.6rem);
+  line-height: 0.9;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: var(--text-shadow-strong);
+}
+
+.celebration-detail {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: clamp(0.95rem, 1.9vw, 1.35rem);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-shadow: var(--text-shadow-soft);
+}
+
+.celebration-actor {
+  font-size: clamp(1rem, 2.2vw, 1.4rem);
+  color: rgba(243, 247, 251, 0.92);
+  text-shadow: var(--text-shadow-soft);
+}
+
 .score-strip {
   align-items: center;
   margin: 24px 0;
   padding: 18px 22px;
-  border-radius: 22px;
+  border-radius: 4px;
   background: rgba(10, 23, 42, 0.96);
   border: 1px solid var(--line);
 }
@@ -252,21 +341,16 @@ select {
   background-image: var(--side-logo);
   background-repeat: no-repeat;
   background-size: auto 100%;
+  background-position: var(--side-watermark-position, center center);
   filter: grayscale(1);
 }
 
 .score-side.has-watermark::before {
-  opacity: 0.05;
+  opacity: var(--side-watermark-opacity, 0.05);
 }
 
-.score-side.watermark-left::before {
-  background-position: left center;
-}
-
-.score-side.watermark-right::before {
-  background-position: right center;
-}
-
+/* Team-side watermark backgrounds intentionally stay behind the readable
+   foreground content. Team-specific tuning is injected from app.js. */
 .score-side-text {
   min-width: 0;
   width: fit-content;
@@ -338,7 +422,7 @@ select {
   z-index: 1;
 }
 
-.score-side.score-side-live .score-side-main {
+.score-side.score-side-compact .score-side-main {
   display: grid;
   justify-items: center;
   align-content: start;
@@ -346,12 +430,12 @@ select {
   width: 100%;
 }
 
-.score-side.score-side-live .score-side-text {
+.score-side.score-side-compact .score-side-text {
   width: auto;
   gap: 4px;
 }
 
-.score-side.score-side-live .score-value {
+.score-side.score-side-compact .score-value {
   justify-self: center;
   margin-bottom: 6px;
 }
@@ -366,9 +450,17 @@ select {
 
 .live-side-card {
   width: min(100%, 390px);
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  grid-template-areas:
+    "photo body"
+    "photo stats";
+  gap: 10px 12px;
+  align-items: stretch;
   padding: 10px 12px;
+  min-height: 150px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 4px;
   background: rgba(8, 16, 31, 0.22);
   -webkit-backdrop-filter: blur(14px) saturate(125%);
   backdrop-filter: blur(14px) saturate(125%);
@@ -376,8 +468,12 @@ select {
   text-align: left;
 }
 
+/* Live hero-side player cards use a frosted treatment so the large team
+   watermark still hints through without fighting the foreground text. */
 .live-side-stats {
-  margin-top: 10px;
+  grid-area: stats;
+  margin-top: 0;
+  min-width: 0;
 }
 
 .live-side-label {
@@ -390,20 +486,39 @@ select {
 }
 
 .live-side-player {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: contents;
+}
+
+.live-side-player > div {
+  display: grid;
+  grid-area: body;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
 }
 
 .live-side-photo {
-  width: 54px;
-  height: 54px;
-  border-radius: 14px;
+  grid-area: photo;
+  width: 100%;
+  height: 100%;
+  min-height: 128px;
+  border-radius: 4px;
   border: 1px solid var(--line);
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center bottom;
+  align-self: stretch;
   background:
     linear-gradient(135deg, rgba(255, 183, 3, 0.28), rgba(93, 211, 158, 0.12)),
     rgba(255, 255, 255, 0.04);
+}
+
+.live-side-photo.has-image:not(.is-fallback),
+.player-photo.has-image:not(.is-fallback) {
+  background: transparent;
+}
+
+.live-side-photo.is-fallback {
+  padding: 18px;
 }
 
 .live-side-name {
@@ -419,6 +534,7 @@ select {
   line-height: 1.35;
   color: var(--muted);
   text-shadow: var(--text-shadow-soft);
+  white-space: pre-line;
 }
 
 .score-value {
@@ -426,6 +542,14 @@ select {
   line-height: 0.85;
   color: var(--accent);
   text-shadow: var(--text-shadow-strong);
+}
+
+.score-value.score-value-record {
+  font-size: clamp(2rem, 4vw, 2.9rem);
+  line-height: 1;
+  color: var(--text);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  letter-spacing: 0.04em;
 }
 
 .center-status {
@@ -444,19 +568,48 @@ select {
   text-shadow: var(--text-shadow-strong);
 }
 
+/* Countdown / inning-center readout */
 .countdown {
-  font-size: clamp(2.4rem, 5vw, 4.2rem);
+  font-size: clamp(1.9rem, 4vw, 3.2rem);
   line-height: 0.9;
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
   text-shadow: var(--text-shadow-strong);
 }
 
+.countdown-launch {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.14em;
+}
+
+.countdown-segment {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.02em;
+}
+
+.countdown-value {
+  color: var(--text);
+  line-height: 1;
+}
+
+.countdown-unit,
+.countdown-sign {
+  color: rgba(157, 179, 201, 0.72);
+}
+
+.countdown-unit {
+  font-size: 0.42em;
+  line-height: 1;
+  margin-top: 0.08em;
+}
+
 .bases-mini {
   display: none;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .bases-mini.is-visible {
@@ -465,28 +618,34 @@ select {
 
 .base-dots {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .base-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.65);
   background: transparent;
   display: inline-block;
 }
 
+.base-dot.is-active {
+  background: rgba(255, 183, 3, 0.92);
+  border-color: rgba(255, 226, 138, 0.98);
+  box-shadow: 0 0 10px rgba(255, 183, 3, 0.35);
+}
+
 .base-diamond {
   position: relative;
-  width: 52px;
-  height: 52px;
+  width: 70px;
+  height: 70px;
 }
 
 .base {
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   border: 1px solid rgba(255, 255, 255, 0.75);
   background: rgba(255, 255, 255, 0.08);
   transform: rotate(45deg);
@@ -494,22 +653,22 @@ select {
 
 .base.second {
   top: 2px;
-  left: 18px;
+  left: 24px;
 }
 
 .base.third {
-  top: 18px;
+  top: 24px;
   left: 2px;
 }
 
 .base.first {
-  top: 18px;
-  left: 34px;
+  top: 24px;
+  left: 46px;
 }
 
 .base.home {
-  top: 34px;
-  left: 18px;
+  top: 46px;
+  left: 24px;
   background: rgba(255, 183, 3, 0.15);
 }
 
@@ -518,6 +677,7 @@ select {
   border-color: rgba(255, 226, 138, 0.95);
 }
 
+/* Count chips and mode-specific center detail text */
 .count-state,
 .player-meta,
 .meta-value,
@@ -528,6 +688,28 @@ select {
 .count-state {
   display: flex;
   justify-content: center;
+}
+
+.elapsed-time {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  min-height: 1.1rem;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  text-shadow: var(--text-shadow-soft);
+}
+
+.elapsed-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.elapsed-value {
+  font-size: 0.92rem;
+  color: rgba(233, 240, 247, 0.86);
 }
 
 .count-layout {
@@ -542,7 +724,7 @@ select {
   min-width: 84px;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -555,6 +737,30 @@ select {
   text-shadow: var(--text-shadow-soft);
 }
 
+.count-status-text {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+.pregame-detail-line {
+  display: block;
+  text-transform: none;
+  letter-spacing: 0.03em;
+  line-height: 1.15;
+  color: var(--muted);
+}
+
+.pregame-detail-location {
+  font-size: clamp(0.92rem, 1.5vw, 1.1rem);
+}
+
+.pregame-detail-time {
+  font-size: clamp(1.02rem, 1.9vw, 1.32rem);
+  color: var(--text);
+  margin-top: 0.28em;
+}
+
 .count-chip-value {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 1.25rem;
@@ -563,6 +769,7 @@ select {
   text-shadow: var(--text-shadow-soft);
 }
 
+/* Lower layout rows */
 .hero-footer,
 .matchup-grid,
 .details-grid {
@@ -589,6 +796,9 @@ select {
 }
 
 .details-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: stretch;
   margin-top: 6px;
 }
 
@@ -596,30 +806,75 @@ select {
   margin-top: 2px;
 }
 
+/* Player cards */
 .player-card,
 .panel {
   flex: 1 1 320px;
   padding: 20px;
 }
 
-.details-grid .linescore-panel {
-  flex: 1 1 60%;
+.player-card {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  grid-template-areas:
+    "label label"
+    "photo name"
+    "photo meta"
+    "photo stats";
+  gap: 10px 16px;
+  align-items: stretch;
 }
 
-.details-grid .notes-panel {
-  flex: 1 1 calc(40% - 16px);
+.details-grid > .panel {
+  min-width: 0;
+  height: 100%;
+}
+
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.notes-panel .panel-header {
+  flex: 0 0 auto;
+}
+
+.notes-panel .recent-play,
+.notes-panel .upcoming-schedule {
+  flex: 0 0 auto;
+}
+
+.notes-panel .recent-play {
+  flex: 1 1 auto;
+}
+
+.notes-panel .probable-pitchers {
+  margin-top: auto;
+  align-items: flex-end;
+}
+
+.notes-panel .probable-pitchers > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .player-header {
-  justify-content: flex-start;
-  margin: 14px 0 16px;
+  display: contents;
+}
+
+.player-header > div {
+  display: contents;
 }
 
 .player-photo {
-  width: 88px;
-  height: 88px;
-  border-radius: 20px;
+  grid-area: photo;
+  width: 100%;
+  height: 100%;
+  min-height: 196px;
+  border-radius: 4px;
   flex-shrink: 0;
+  align-self: stretch;
   background:
     linear-gradient(135deg, rgba(255, 183, 3, 0.28), rgba(93, 211, 158, 0.12)),
     rgba(255, 255, 255, 0.04);
@@ -627,15 +882,21 @@ select {
 }
 
 .player-photo.has-image {
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center bottom;
   padding: 0;
 }
 
 .player-photo.is-fallback {
-  padding: 14px;
+  padding: 24px;
+}
+
+.player-card > .section-label {
+  grid-area: label;
 }
 
 .player-card h3 {
+  grid-area: name;
   font-size: 2rem;
   line-height: 0.95;
 }
@@ -647,14 +908,115 @@ select {
   margin: 0;
 }
 
+.player-meta {
+  grid-area: meta;
+  white-space: pre-line;
+}
+
 .player-line,
 .recent-play {
   font-size: 1.05rem;
   line-height: 1.55;
 }
 
+/* Pregame schedule strip */
+.upcoming-schedule {
+  margin: 0;
+  padding-top: 6px;
+}
+
+.schedule-strip {
+  display: grid;
+  grid-template-columns: repeat(var(--schedule-columns, 5), minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+
+.schedule-item {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 5px;
+  min-height: 136px;
+  padding: 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.035);
+  text-align: center;
+}
+
+.schedule-item-date,
+.schedule-item-site,
+.schedule-item-time {
+  margin: 0;
+}
+
+.schedule-item-date {
+  display: grid;
+  gap: 2px;
+}
+
+.schedule-item-weekday {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.66rem;
+  text-shadow: var(--text-shadow-soft);
+}
+
+.schedule-item-day {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: var(--text);
+}
+
+.schedule-item-site {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.schedule-item-logo-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+}
+
+.schedule-item-logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.schedule-item-logo-placeholder {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.schedule-item-time {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+.schedule-empty {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
+
+/* Stat blocks shared by large cards and compact live role cards */
 .player-stats {
+  grid-area: stats;
   margin-top: 4px;
+  min-width: 0;
 }
 
 .player-stat-block {
@@ -669,14 +1031,14 @@ select {
   gap: 16px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.035);
 }
 
 .player-stat-summary-compact {
   padding: 8px 10px;
   gap: 10px;
-  border-radius: 10px;
+  border-radius: 4px;
 }
 
 .player-stat-summary-label {
@@ -705,7 +1067,7 @@ select {
 .player-stat-table td {
   text-align: center;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 4px;
   padding: 10px 8px;
 }
 
@@ -732,7 +1094,7 @@ select {
 .player-stat-table-compact th,
 .player-stat-table-compact td {
   padding: 6px 5px;
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .player-stat-table-compact th {
@@ -743,6 +1105,10 @@ select {
   font-size: 0.82rem;
 }
 
+/* Linescore table
+   - app.js always pads the display to innings 1-9
+   - the table can still expand for extras
+   - active and future half-innings are styled differently */
 .linescore {
   display: grid;
   gap: 10px;
@@ -755,7 +1121,7 @@ select {
 
 .linescore-empty {
   padding: 18px;
-  border-radius: 14px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--muted);
 }
@@ -775,14 +1141,25 @@ select {
 .linescore-total-header,
 .linescore-total-cell {
   min-width: 44px;
-  height: 42px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.04);
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   text-align: center;
   vertical-align: middle;
+}
+
+.linescore-team-label,
+.linescore-cell,
+.linescore-total-cell {
+  height: 42px;
+}
+
+.linescore-team-spacer,
+.linescore-inning-header-cell,
+.linescore-total-header {
+  height: 21px;
 }
 
 .linescore-team-label {
@@ -864,7 +1241,7 @@ select {
 .linescore-row {
   align-items: center;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -922,7 +1299,18 @@ select {
   .linescore-total-header,
   .linescore-total-cell {
     min-width: 38px;
+  }
+
+  .linescore-team-label,
+  .linescore-cell,
+  .linescore-total-cell {
     height: 38px;
+  }
+
+  .linescore-team-spacer,
+  .linescore-inning-header-cell,
+  .linescore-total-header {
+    height: 19px;
   }
 
   .linescore-team-label,
@@ -930,8 +1318,24 @@ select {
     min-width: 60px;
   }
 
-  .details-grid .linescore-panel,
-  .details-grid .notes-panel {
-    flex-basis: 100%;
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .live-side-card {
+    grid-template-columns: 88px minmax(0, 1fr);
+    min-height: 138px;
+  }
+
+  .live-side-photo {
+    min-height: 116px;
+  }
+
+  .player-card {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  .player-photo {
+    min-height: 156px;
   }
 }

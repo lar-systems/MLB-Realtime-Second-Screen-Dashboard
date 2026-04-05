@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2026-04-02-15">
+  <link rel="stylesheet" href="styles.css?v=2026-04-05-2035">
 </head>
 <body>
   <div class="app-shell">
@@ -28,6 +28,14 @@
           <p id="mode-label" class="mode-label">Pregame</p>
           <p id="updated-clock" class="updated-clock">Local 00:00:00</p>
           <p id="status-label" class="status-label">Awaiting first pitch</p>
+        </div>
+
+        <div id="celebration-modal" class="celebration-modal" hidden aria-live="polite" aria-atomic="true">
+          <div id="celebration-card" class="celebration-card">
+            <p id="celebration-label" class="celebration-label">HIT</p>
+            <p id="celebration-detail" class="celebration-detail">1st hit</p>
+            <p id="celebration-actor" class="celebration-actor">Batter Name</p>
+          </div>
         </div>
 
         <div class="score-strip">
@@ -71,10 +79,11 @@
                 <span class="base home"></span>
               </span>
             </div>
-            <div id="center-state" class="center-state">Next Game</div>
-            <div id="countdown" class="countdown">00:00:00</div>
-            <div id="count-state" class="count-state">B 0 | S 0 | O 0</div>
-          </div>
+             <div id="center-state" class="center-state">Next Game</div>
+             <div id="countdown" class="countdown">00:00:00</div>
+             <div id="count-state" class="count-state">B 0 | S 0 | O 0</div>
+             <div id="elapsed-time" class="elapsed-time" hidden></div>
+            </div>
 
           <article class="score-side home">
             <div class="score-side-main home-main">
@@ -148,23 +157,24 @@
       <section id="details-grid" class="details-grid">
         <article class="panel linescore-panel">
           <div class="panel-header">
-            <p class="section-label">Linescore</p>
+            <p id="linescore-label" class="section-label">Linescore</p>
           </div>
           <div id="linescore" class="linescore"></div>
         </article>
 
         <article class="panel notes-panel">
           <div class="panel-header">
-            <p class="section-label">Game Notes</p>
+            <p id="notes-label" class="section-label">Game Notes</p>
           </div>
           <p id="recent-play" class="recent-play">Live event summary will appear here.</p>
-          <div class="probable-pitchers">
-            <div>
-              <p class="meta-label">Team Probable</p>
+          <div id="upcoming-schedule" class="upcoming-schedule" hidden></div>
+          <div id="notes-meta-row" class="probable-pitchers">
+            <div id="notes-meta-1">
+              <p id="notes-meta-1-label" class="meta-label">Team Probable</p>
               <p id="team-probable" class="meta-value">TBD</p>
             </div>
-            <div>
-              <p class="meta-label">Opponent Probable</p>
+            <div id="notes-meta-2">
+              <p id="notes-meta-2-label" class="meta-label">Opponent Probable</p>
               <p id="opponent-probable" class="meta-value">TBD</p>
             </div>
           </div>
@@ -185,6 +195,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=2026-04-02-7" type="module"></script>
-</body>
-</html>
+  <script src="app.js?v=2026-04-05-2145" type="module"></script>
+  </body>
+  </html>

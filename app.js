@@ -1,3 +1,11 @@
+/*
+ * Main-thread dashboard controller.
+ *
+ * The worker owns baseball data and normalization.
+ * This file owns DOM updates, display timers, persistence, and the final
+ * mapping from normalized state into the shared pregame/live/final layouts.
+ */
+
 const STORAGE_KEYS = {
   teamId: "mlb.teamId",
   lastState: "mlb.lastState",
@@ -40,13 +48,23 @@ const state = {
   worker: null,
   countdownTimer: null,
   current: null,
-  debug: {
-    workerStatus: "not started",
-    lastWorkerError: null,
-    appVersion: "debug-2026-04-02-2247",
+  celebration: {
+    lastSeenId: null,
+    fadeTimer: null,
+    hideTimer: null,
   },
-};
+    debug: {
+      workerStatus: "not started",
+      lastWorkerError: null,
+      appVersion: "debug-2026-04-05-2145",
+    },
+  };
 
+// Portrait cleanup uses canvas work, so cache processed headshots instead of
+// recalculating transparency on every rerender.
+const portraitImageCache = new Map();
+
+// Keep all DOM lookups in one place so markup changes are easy to review.
 const elements = {
   awaySide: document.querySelector(".score-side.away"),
   homeSide: document.querySelector(".score-side.home"),
@@ -58,6 +76,11 @@ const elements = {
   modeLabel: document.querySelector("#mode-label"),
   updatedClock: document.querySelector("#updated-clock"),
   statusLabel: document.querySelector("#status-label"),
+  celebrationModal: document.querySelector("#celebration-modal"),
+  celebrationCard: document.querySelector("#celebration-card"),
+  celebrationLabel: document.querySelector("#celebration-label"),
+  celebrationDetail: document.querySelector("#celebration-detail"),
+  celebrationActor: document.querySelector("#celebration-actor"),
   awayLogo: document.querySelector("#away-logo"),
   awayRecord: document.querySelector("#away-record"),
   awayStanding: document.querySelector("#away-standing"),
@@ -80,10 +103,11 @@ const elements = {
   homeLiveRoleStats: document.querySelector("#home-live-role-stats"),
   homeName: document.querySelector("#home-name"),
   homeScore: document.querySelector("#home-score"),
-  centerState: document.querySelector("#center-state"),
-  countdown: document.querySelector("#countdown"),
-  countState: document.querySelector("#count-state"),
-  basesMini: document.querySelector("#bases-mini"),
+    centerState: document.querySelector("#center-state"),
+    countdown: document.querySelector("#countdown"),
+    countState: document.querySelector("#count-state"),
+    elapsedTime: document.querySelector("#elapsed-time"),
+    basesMini: document.querySelector("#bases-mini"),
   footerSlot1Label: document.querySelector("#footer-slot-1-label"),
   footerSlot1Value: document.querySelector("#footer-slot-1-value"),
   footerSlot2Label: document.querySelector("#footer-slot-2-label"),
@@ -102,15 +126,23 @@ const elements = {
   rightCardLabel: document.querySelector("#right-card-label"),
   pitcherName: document.querySelector("#pitcher-name"),
   pitcherMeta: document.querySelector("#pitcher-meta"),
-  pitcherLine: document.querySelector("#pitcher-line"),
-  linescore: document.querySelector("#linescore"),
-  recentPlay: document.querySelector("#recent-play"),
-  teamProbable: document.querySelector("#team-probable"),
+    pitcherLine: document.querySelector("#pitcher-line"),
+    linescoreLabel: document.querySelector("#linescore-label"),
+    linescore: document.querySelector("#linescore"),
+    notesLabel: document.querySelector("#notes-label"),
+    recentPlay: document.querySelector("#recent-play"),
+    upcomingSchedule: document.querySelector("#upcoming-schedule"),
+    notesMetaRow: document.querySelector("#notes-meta-row"),
+    notesMeta1: document.querySelector("#notes-meta-1"),
+    notesMeta1Label: document.querySelector("#notes-meta-1-label"),
+    teamProbable: document.querySelector("#team-probable"),
+  notesMeta2: document.querySelector("#notes-meta-2"),
+  notesMeta2Label: document.querySelector("#notes-meta-2-label"),
   opponentProbable: document.querySelector("#opponent-probable"),
   debugOutput: document.querySelector("#debug-output"),
 };
 
-init();
+// ----- Startup and worker wiring -----
 
 function init() {
   populateTeamSelect();
@@ -147,6 +179,7 @@ function bindEvents() {
 function renderStartupState() {
   const cached = loadCachedState();
   if (cached) {
+    state.celebration.lastSeenId = cached?.live?.celebration?.id || null;
     renderState(cached);
     return;
   }
@@ -216,6 +249,7 @@ function handleWorkerMessageError() {
   }
 }
 
+// Apply the shared shell first, then hand off to the mode-specific renderer.
 function renderState(nextState) {
   state.current = nextState;
   elements.teamTitle.textContent = `${nextState.team?.name || "MLB"} Dashboard`;
@@ -233,84 +267,154 @@ function renderState(nextState) {
     renderFinal(nextState);
   }
 
+  syncCelebration(nextState);
   restartCountdown(nextState);
 }
 
+function syncCelebration(nextState) {
+  if (nextState?.mode !== "live") {
+    hideCelebration(true);
+    return;
+  }
+
+  const celebration = nextState?.live?.celebration;
+  if (!celebration?.id) {
+    return;
+  }
+
+  if (celebration.id === state.celebration.lastSeenId) {
+    return;
+  }
+
+  state.celebration.lastSeenId = celebration.id;
+  showCelebration(celebration);
+}
+
+function showCelebration(celebration) {
+  if (!elements.celebrationModal || !elements.celebrationCard) {
+    return;
+  }
+
+  window.clearTimeout(state.celebration.fadeTimer);
+  window.clearTimeout(state.celebration.hideTimer);
+
+  elements.celebrationLabel.textContent = celebration.label || "";
+  elements.celebrationDetail.textContent = celebration.detail || "";
+  elements.celebrationActor.textContent = celebration.actor || "";
+  elements.celebrationCard.classList.toggle("is-pitcher", celebration.tone === "pitcher");
+  elements.celebrationCard.classList.toggle("is-batter", celebration.tone !== "pitcher");
+  elements.celebrationModal.hidden = false;
+  elements.celebrationModal.classList.remove("is-visible", "is-exiting");
+
+  window.requestAnimationFrame(() => {
+    elements.celebrationModal.classList.add("is-visible");
+  });
+
+  state.celebration.fadeTimer = window.setTimeout(() => {
+    elements.celebrationModal.classList.remove("is-visible");
+    elements.celebrationModal.classList.add("is-exiting");
+  }, 4500);
+
+  state.celebration.hideTimer = window.setTimeout(() => {
+    hideCelebration(true);
+  }, 5000);
+}
+
+function hideCelebration(immediate = false) {
+  if (!elements.celebrationModal) {
+    return;
+  }
+
+  window.clearTimeout(state.celebration.fadeTimer);
+  window.clearTimeout(state.celebration.hideTimer);
+
+  if (immediate) {
+    elements.celebrationModal.hidden = true;
+    elements.celebrationModal.classList.remove("is-visible", "is-exiting");
+    elements.celebrationCard?.classList.remove("is-pitcher", "is-batter");
+  }
+}
+
+// Pregame reuses the live shell, but swaps scores for records and uses
+// probable starters instead of the active batter / pitcher.
 function renderPregame(nextState) {
-  setLiveLayout(false);
-  setSideWatermark(elements.awaySide, "");
-  setSideWatermark(elements.homeSide, "");
+  setStateLayout("pregame");
   const selectedTeam = nextState.team?.name || "Selected Team";
   const game = nextState.nextGame;
+  const previousGame = nextState.previousGame;
+  const upcomingSchedule = Array.isArray(nextState.upcomingSchedule) ? nextState.upcomingSchedule : [];
   const homeName = game?.isHome ? selectedTeam : game?.opponent || "Opponent";
   const awayName = game?.isHome ? game?.opponent || "Opponent" : selectedTeam;
   const teamPitcher = game?.probablePitchers?.team || null;
   const opponentPitcher = game?.probablePitchers?.opponent || null;
   const gameStatus = game?.statusText || "Awaiting first pitch";
   const specialStatus = isSpecialPregameStatus(gameStatus);
+  const awayLogo = game?.isHome ? game?.opponentLogoUrl || "" : nextState.team?.logoUrl || "";
+  const homeLogo = game?.isHome ? nextState.team?.logoUrl || "" : game?.opponentLogoUrl || "";
+  const awayRecord = game?.isHome ? game?.opponentRecord : game?.teamRecord;
+  const homeRecord = game?.isHome ? game?.teamRecord : game?.opponentRecord;
+  const awayStanding = game?.isHome ? game?.opponentStanding : game?.teamStanding;
+  const homeStanding = game?.isHome ? game?.teamStanding : game?.opponentStanding;
+  const awayPitcher = game?.isHome ? opponentPitcher : teamPitcher;
+  const homePitcher = game?.isHome ? teamPitcher : opponentPitcher;
 
   elements.statusLabel.textContent = gameStatus;
-  setImage(elements.awayLogo, game?.isHome ? game?.opponentLogoUrl || "" : nextState.team?.logoUrl || "", `${awayName} logo`);
-  setImage(elements.homeLogo, game?.isHome ? nextState.team?.logoUrl || "" : game?.opponentLogoUrl || "", `${homeName} logo`);
+  setSideWatermark(elements.awaySide, awayLogo, "left");
+  setSideWatermark(elements.homeSide, homeLogo, "right");
+  setImage(elements.awayLogo, "", `${awayName} logo`);
+  setImage(elements.homeLogo, "", `${homeName} logo`);
   elements.awayLogo.classList.remove("logo-edge-left", "logo-edge-right");
   elements.homeLogo.classList.remove("logo-edge-left", "logo-edge-right");
-  setRecord(elements.awayRecord, game?.isHome ? game?.opponentRecord : game?.teamRecord);
-  setRecord(elements.homeRecord, game?.isHome ? game?.teamRecord : game?.opponentRecord);
-  setStanding(elements.awayStanding, game?.isHome ? game?.opponentStanding : game?.teamStanding);
-  setStanding(elements.homeStanding, game?.isHome ? game?.teamStanding : game?.opponentStanding);
-  setLiveRoleCard("away", null);
-  setLiveRoleCard("home", null);
+  setRecord(elements.awayRecord, null);
+  setRecord(elements.homeRecord, null);
+  setStanding(elements.awayStanding, awayStanding);
+  setStanding(elements.homeStanding, homeStanding);
+  setLiveRoleCard("away", buildProbablePitcherCardConfig(awayPitcher, awayName));
+  setLiveRoleCard("home", buildProbablePitcherCardConfig(homePitcher, homeName));
   elements.leftCardLabel.textContent = game?.isHome ? "Away Probable" : "Team Probable";
   elements.rightCardLabel.textContent = game?.isHome ? "Home Probable" : "Opponent Probable";
   elements.awayName.textContent = awayName;
   elements.homeName.textContent = homeName;
-  elements.awayScore.textContent = "";
-  elements.homeScore.textContent = "";
+  setScoreValue(elements.awayScore, awayRecord || "--", "record");
+  setScoreValue(elements.homeScore, homeRecord || "--", "record");
   elements.centerState.textContent = specialStatus ? "Game Status" : "Next Game";
   elements.countState.innerHTML = specialStatus
     ? `<span class="count-status-text">${formatPregameStatusDetail(game)}</span>`
-    : `<span class="count-status-text">${game?.isHome ? "Home Game" : "Road Game"}</span>`;
+    : `<span class="count-status-text">${formatPregameCountdownDetail(game)}</span>`;
+  setElapsedTime(null);
   setMiniBases(null);
-  setFooterSlots(
-    ["Venue", game?.venue || "Venue TBD"],
-    ["First Pitch", formatDateTime(game?.startTime)],
-    ["Matchup", `${awayName} at ${homeName}`]
-  );
-  elements.recentPlay.textContent = specialStatus
-    ? `${gameStatus}. ${formatPregameStatusDetail(game)}`
-    : "Pregame mode. Countdown is running locally until first pitch.";
-  elements.teamProbable.textContent = teamPitcher?.name || "TBD";
-  elements.opponentProbable.textContent = opponentPitcher?.name || "TBD";
+  setFooterSlots(["", ""], ["", ""], ["", ""]);
+  renderUpcomingSchedule(upcomingSchedule);
 
   setPlayerCard(elements.batterPhoto, elements.batterName, elements.batterMeta, elements.batterLine, {
-    name: resolveProbablePitcherName(game?.isHome ? opponentPitcher : teamPitcher, game?.isHome ? game?.opponent : selectedTeam),
-    meta: game?.isHome
-      ? `${game?.opponent || "Opponent"} probable starter${pitchHandSuffix(opponentPitcher?.throws)}`
-      : `${selectedTeam} probable starter${pitchHandSuffix(teamPitcher?.throws)}`,
-    stats: buildPitcherStatsConfig(game?.isHome ? opponentPitcher : teamPitcher),
-    line: game?.isHome
-      ? opponentPitcher?.seasonLine || `Projected to start for ${game?.opponent || "the opponent"}.`
-      : teamPitcher?.seasonLine || `Projected to start for ${selectedTeam}.`,
-    photo: game?.isHome ? opponentPitcher?.photo || "" : teamPitcher?.photo || "",
+    name: resolveProbablePitcherName(awayPitcher, awayName),
+    meta: buildProbablePitcherMeta(awayName, "probable starter", awayPitcher?.throws),
+    stats: buildPitcherStatsConfig(awayPitcher),
+    line: awayPitcher?.seasonLine || `Projected to start for ${awayName}.`,
+    photo: awayPitcher?.photo || "",
   });
 
   setPlayerCard(elements.pitcherPhoto, elements.pitcherName, elements.pitcherMeta, elements.pitcherLine, {
-    name: resolveProbablePitcherName(game?.isHome ? teamPitcher : opponentPitcher, game?.isHome ? selectedTeam : game?.opponent),
-    meta: game?.isHome
-      ? `${selectedTeam} probable starter${pitchHandSuffix(teamPitcher?.throws)}`
-      : `${game?.opponent || "Opponent"} probable starter${pitchHandSuffix(opponentPitcher?.throws)}`,
-    stats: buildPitcherStatsConfig(game?.isHome ? teamPitcher : opponentPitcher),
-    line: game?.isHome
-      ? teamPitcher?.seasonLine || `Projected to start for ${selectedTeam}.`
-      : opponentPitcher?.seasonLine || `Projected to start for ${game?.opponent || "the opponent"}.`,
-    photo: game?.isHome ? teamPitcher?.photo || "" : opponentPitcher?.photo || "",
+    name: resolveProbablePitcherName(homePitcher, homeName),
+    meta: buildProbablePitcherMeta(homeName, "probable starter", homePitcher?.throws),
+    stats: buildPitcherStatsConfig(homePitcher),
+    line: homePitcher?.seasonLine || `Projected to start for ${homeName}.`,
+    photo: homePitcher?.photo || "",
   });
 
-  renderLinescore([]);
+  setLinescoreLabel(buildPreviousGameLabel(previousGame));
+  renderLinescore(previousGame?.linescore || [], {
+    awayLabel: previousGame?.away?.abbr || previousGame?.away?.name || "AWY",
+    homeLabel: previousGame?.home?.abbr || previousGame?.home?.name || "HME",
+    awayTotals: buildFixedLinescoreTotals(previousGame?.awayScore, previousGame?.awayHits, previousGame?.awayErrors),
+    homeTotals: buildFixedLinescoreTotals(previousGame?.homeScore, previousGame?.homeHits, previousGame?.homeErrors),
+    emptyMessage: "Waiting for previous game linescore.",
+  });
 }
 
+// Live mode is the most compact view and prioritizes current game state.
 function renderLive(nextState) {
-  setLiveLayout(true);
+  setStateLayout("live");
   const live = nextState.live;
   elements.leftCardLabel.textContent = "Current Batter";
   elements.rightCardLabel.textContent = "Current Pitcher";
@@ -328,19 +432,27 @@ function renderLive(nextState) {
   assignLiveRoleCards(live);
   elements.awayName.textContent = live?.away?.name || "Away";
   elements.homeName.textContent = live?.home?.name || "Home";
-  elements.awayScore.textContent = String(live?.away?.score ?? 0);
-  elements.homeScore.textContent = String(live?.home?.score ?? 0);
-  elements.centerState.textContent = `${live?.inningHalf || ""} ${live?.inning || ""}`.trim() || "In Progress";
+  setScoreValue(elements.awayScore, String(live?.away?.score ?? 0), "score");
+  setScoreValue(elements.homeScore, String(live?.home?.score ?? 0), "score");
+  elements.centerState.textContent = formatInningState(live?.inningHalf, live?.inning) || "In Progress";
   elements.countState.innerHTML = renderCountSummary(live);
-  setMiniBases(live?.bases || null);
+  setElapsedTime(live?.startTime || null);
+  setMiniBases(live?.bases || null, live?.outs ?? 0);
   setFooterSlots(
     ["", ""],
     ["", ""],
     ["", ""]
   );
+  setNotesTitle("Game Notes");
+  hideUpcomingSchedule();
   elements.recentPlay.textContent = live?.recentPlay || "Latest play text unavailable.";
-  elements.teamProbable.textContent = "Live mode";
-  elements.opponentProbable.textContent = basesText(live?.bases);
+  elements.recentPlay.hidden = false;
+  setNotesMeta(
+    "Play State",
+    formatInningState(live?.inningHalf, live?.inning) || "Live",
+    "Basepaths",
+    basesText(live?.bases)
+  );
 
   setPlayerCard(elements.batterPhoto, elements.batterName, elements.batterMeta, elements.batterLine, {
     name: live?.batter?.name || "Batter unavailable",
@@ -358,72 +470,104 @@ function renderLive(nextState) {
     photo: live?.pitcher?.photo || "",
   });
 
+  setLinescoreLabel("Linescore");
   renderLinescore(live?.linescore || []);
 }
 
+// Final mode bridges the completed game and the next scheduled matchup.
 function renderFinal(nextState) {
-  setLiveLayout(false);
-  setSideWatermark(elements.awaySide, "");
-  setSideWatermark(elements.homeSide, "");
+  setStateLayout("final");
   const final = nextState.final;
   const nextGame = nextState.nextGame;
   const selectedTeam = nextState.team?.name || "Selected Team";
   const teamPitcher = nextGame?.probablePitchers?.team || null;
   const opponentPitcher = nextGame?.probablePitchers?.opponent || null;
+  const nextGameStatus = nextGame?.statusText || "Next Up";
+  const specialStatus = isSpecialPregameStatus(nextGameStatus);
+  const homeName = nextGame
+    ? (nextGame.isHome ? selectedTeam : nextGame.opponent || "Next Opponent")
+    : "Home";
+  const awayName = nextGame
+    ? (nextGame.isHome ? nextGame.opponent || "Next Opponent" : selectedTeam)
+    : selectedTeam;
+  const awayLogo = nextGame?.isHome ? nextGame?.opponentLogoUrl || "" : nextState.team?.logoUrl || "";
+  const homeLogo = nextGame?.isHome ? nextState.team?.logoUrl || "" : nextGame?.opponentLogoUrl || "";
+  const awayRecord = nextGame?.isHome ? nextGame?.opponentRecord : nextGame?.teamRecord;
+  const homeRecord = nextGame?.isHome ? nextGame?.teamRecord : nextGame?.opponentRecord;
+  const awayStanding = nextGame?.isHome ? nextGame?.opponentStanding : nextGame?.teamStanding;
+  const homeStanding = nextGame?.isHome ? nextGame?.teamStanding : nextGame?.opponentStanding;
+  const awayPitcher = nextGame?.isHome ? opponentPitcher : teamPitcher;
+  const homePitcher = nextGame?.isHome ? teamPitcher : opponentPitcher;
 
-  elements.statusLabel.textContent = "Game complete";
-  setImage(elements.awayLogo, nextState.team?.logoUrl, `${nextState.team?.name || "Team"} logo`);
-  setImage(elements.homeLogo, nextGame?.opponentLogoUrl || "", `${nextGame?.opponent || "Opponent"} logo`);
+  elements.statusLabel.textContent = nextGame ? nextGameStatus : "Game Complete";
+  setSideWatermark(elements.awaySide, awayLogo, "left");
+  setSideWatermark(elements.homeSide, homeLogo, "right");
+  setImage(elements.awayLogo, "", `${awayName} logo`);
+  setImage(elements.homeLogo, "", `${homeName} logo`);
   elements.awayLogo.classList.remove("logo-edge-left", "logo-edge-right");
   elements.homeLogo.classList.remove("logo-edge-left", "logo-edge-right");
-  setRecord(elements.awayRecord, nextGame?.teamRecord || null);
-  setRecord(elements.homeRecord, nextGame?.opponentRecord || null);
-  setStanding(elements.awayStanding, nextGame?.teamStanding || null);
-  setStanding(elements.homeStanding, nextGame?.opponentStanding || null);
-  setLiveRoleCard("away", null);
-  setLiveRoleCard("home", null);
+  setRecord(elements.awayRecord, null);
+  setRecord(elements.homeRecord, null);
+  setStanding(elements.awayStanding, awayStanding || null);
+  setStanding(elements.homeStanding, homeStanding || null);
+  setLiveRoleCard("away", nextGame ? buildProbablePitcherCardConfig(awayPitcher, awayName) : null);
+  setLiveRoleCard("home", nextGame ? buildProbablePitcherCardConfig(homePitcher, homeName) : null);
   elements.leftCardLabel.textContent = "Team Probable";
   elements.rightCardLabel.textContent = "Opponent Probable";
-  elements.awayName.textContent = nextState.team?.name || "Selected Team";
-  elements.homeName.textContent = nextGame?.opponent || "Next Opponent";
-  elements.awayScore.textContent = String(final?.awayScore ?? "-");
-  elements.homeScore.textContent = String(final?.homeScore ?? "-");
-  elements.centerState.textContent = nextGame ? "Next Game" : "Final";
+  elements.awayName.textContent = awayName;
+  elements.homeName.textContent = homeName;
+  if (nextGame) {
+    setScoreValue(elements.awayScore, awayRecord || "--", "record");
+    setScoreValue(elements.homeScore, homeRecord || "--", "record");
+  } else {
+    setScoreValue(elements.awayScore, String(final?.awayScore ?? "-"), "score");
+    setScoreValue(elements.homeScore, String(final?.homeScore ?? "-"), "score");
+  }
+  elements.centerState.textContent = nextGame
+    ? (specialStatus ? "Game Status" : "Next Game")
+    : "Final";
   elements.countState.innerHTML = nextGame
-    ? `<span class="count-status-text">${nextGame.isHome ? "Home" : "Road"} vs ${nextGame.opponent || "Opponent"}</span>`
+    ? `<span class="count-status-text">${specialStatus ? formatPregameStatusDetail(nextGame) : formatPregameCountdownDetail(nextGame)}</span>`
     : `<span class="count-status-text">Awaiting schedule</span>`;
+  setElapsedTime(null);
   setMiniBases(null);
-  setFooterSlots(
-    ["Final", final ? `${final.awayScore ?? "-"} - ${final.homeScore ?? "-"}` : "Final"],
-    ["Next Game", nextGame ? formatDateTime(nextGame.startTime) : "TBD"],
-    ["Venue", nextGame?.venue || "Next venue TBD"]
-  );
+  setFooterSlots(["", ""], ["", ""], ["", ""]);
+  setNotesTitle("Game Notes");
+  hideUpcomingSchedule();
   elements.recentPlay.textContent = final?.summary || "Final game summary unavailable.";
-  elements.teamProbable.textContent = teamPitcher?.name || "TBD";
-  elements.opponentProbable.textContent = opponentPitcher?.name || "TBD";
+  elements.recentPlay.hidden = false;
+  setNotesMeta(
+    "Last Final",
+    final ? `${final.awayScore ?? "-"} - ${final.homeScore ?? "-"}` : "Final complete",
+    nextGame ? "Next Pitch" : "Next Game",
+    nextGame ? formatDateTime(nextGame.startTime) : "Schedule pending"
+  );
 
   setPlayerCard(elements.batterPhoto, elements.batterName, elements.batterMeta, elements.batterLine, {
-    name: resolveProbablePitcherName(teamPitcher, selectedTeam),
-    meta: `${selectedTeam} projected starter${pitchHandSuffix(teamPitcher?.throws)}`,
-    stats: buildPitcherStatsConfig(teamPitcher),
+    name: resolveProbablePitcherName(awayPitcher, awayName),
+    meta: buildProbablePitcherMeta(awayName, "projected starter", awayPitcher?.throws),
+    stats: buildPitcherStatsConfig(awayPitcher),
     line: nextGame
-      ? teamPitcher?.seasonLine || `Expected pitching matchup for ${formatDateTime(nextGame.startTime)}.`
+      ? awayPitcher?.seasonLine || `Expected pitching matchup for ${formatDateTime(nextGame.startTime)}.`
       : final?.summary || "The dashboard will pivot back to the next scheduled game after final.",
-    photo: teamPitcher?.photo || "",
+    photo: awayPitcher?.photo || "",
   });
 
   setPlayerCard(elements.pitcherPhoto, elements.pitcherName, elements.pitcherMeta, elements.pitcherLine, {
-    name: resolveProbablePitcherName(opponentPitcher, nextGame?.opponent),
-    meta: `${nextGame?.opponent || "Opponent"} projected starter${pitchHandSuffix(opponentPitcher?.throws)}`,
-    stats: buildPitcherStatsConfig(opponentPitcher),
+    name: resolveProbablePitcherName(homePitcher, homeName),
+    meta: buildProbablePitcherMeta(homeName, "projected starter", homePitcher?.throws),
+    stats: buildPitcherStatsConfig(homePitcher),
     line: nextGame
-      ? opponentPitcher?.seasonLine || `Countdown target: ${formatDateTime(nextGame.startTime)}`
+      ? homePitcher?.seasonLine || `Countdown target: ${formatDateTime(nextGame.startTime)}`
       : "No upcoming game found yet.",
-    photo: opponentPitcher?.photo || "",
+    photo: homePitcher?.photo || "",
   });
 
+  setLinescoreLabel("Linescore");
   renderLinescore([]);
 }
+
+// ----- Player cards and stat blocks -----
 
 function setPlayerCard(photoElement, nameElement, metaElement, lineElement, data) {
   nameElement.textContent = data.name || "Unavailable";
@@ -454,6 +598,7 @@ function buildStatBlockMarkup(statsConfig, variant = "card") {
     ? statsConfig.metrics.filter((metric) => hasDisplayValue(metric?.value))
     : [];
   const summaryValue = statsConfig?.summaryValue;
+  const showSummaryLabel = Boolean(statsConfig?.summaryLabel) && statsConfig?.hideSummaryLabel !== true;
 
   if (!hasDisplayValue(summaryValue) && !metrics.length) {
     return "";
@@ -471,7 +616,7 @@ function buildStatBlockMarkup(statsConfig, variant = "card") {
   if (hasDisplayValue(summaryValue)) {
     markup += `
       <div class="${summaryClass}">
-        <span class="player-stat-summary-label">${escapeHtml(statsConfig?.summaryLabel || "Today")}</span>
+        ${showSummaryLabel ? `<span class="player-stat-summary-label">${escapeHtml(statsConfig?.summaryLabel || "Today")}</span>` : ""}
         <span class="player-stat-summary-value">${escapeHtml(String(summaryValue))}</span>
       </div>
     `;
@@ -494,11 +639,13 @@ function buildStatBlockMarkup(statsConfig, variant = "card") {
   return markup;
 }
 
+// Batter cards intentionally separate immediate game context from season stats.
 function buildBatterStatsConfig(player, options = {}) {
   const compact = Boolean(options.compact);
   return {
     summaryLabel: "Today",
     summaryValue: player?.todayLine || null,
+    hideSummaryLabel: Boolean(options.hideSummaryLabel),
     metrics: compact
       ? [
           statMetric("AVG", player?.seasonStats?.average),
@@ -516,11 +663,13 @@ function buildBatterStatsConfig(player, options = {}) {
   };
 }
 
+// Pitcher tables stay opinionated so the small cards remain readable at a glance.
 function buildPitcherStatsConfig(player, options = {}) {
   const includeToday = options.includeToday !== false;
   return {
     summaryLabel: "Today",
     summaryValue: includeToday ? player?.todayLine || null : null,
+    hideSummaryLabel: Boolean(options.hideSummaryLabel),
     metrics: [
       statMetric("ERA", player?.seasonStats?.era),
       statMetric("WHIP", player?.seasonStats?.whip),
@@ -546,8 +695,34 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+// `setImage` does more than assign `src`:
+// - preserves already-good team logos during transient rerenders
+// - routes player photos through the portrait cleanup pipeline
+// - prevents stale async portrait work from winning a later race
 function setImage(element, src, alt, options = {}) {
   if (!element) {
+    return;
+  }
+
+  if (
+    !src &&
+    !options.usePlayerFallback &&
+    element.dataset.sourceSrc &&
+    element.classList.contains("has-image") &&
+    !element.hidden
+  ) {
+    element.alt = alt || "";
+    return;
+  }
+
+  if (
+    src &&
+    !options.usePlayerFallback &&
+    element.dataset.sourceSrc === src &&
+    element.classList.contains("has-image") &&
+    !element.hidden
+  ) {
+    element.alt = alt || "";
     return;
   }
 
@@ -556,11 +731,21 @@ function setImage(element, src, alt, options = {}) {
   element.removeAttribute("src");
   element.classList.remove("has-image", "is-fallback");
   element.onerror = null;
+  element.onload = null;
+  element.dataset.sourceSrc = src || "";
+
+  const requestKey = `${src}|${Date.now()}|${Math.random()}`;
+  element.dataset.requestKey = requestKey;
 
   if (!src) {
     if (options.usePlayerFallback) {
       applyPlayerFallback(element, alt);
     }
+    return;
+  }
+
+  if (options.usePlayerFallback && !src.startsWith("data:")) {
+    loadProcessedPortrait(element, src, alt, options, requestKey);
     return;
   }
 
@@ -576,6 +761,376 @@ function setImage(element, src, alt, options = {}) {
   element.src = src;
   element.hidden = false;
   element.classList.add("has-image");
+}
+
+// MLB headshots often ship with a flat gray backdrop. We remove that backdrop
+// once, cache the transparent result, and then reuse the cached image.
+function loadProcessedPortrait(element, src, alt, options, requestKey) {
+  const cached = portraitImageCache.get(src);
+  if (cached) {
+    applyResolvedImage(element, cached, alt, options, requestKey);
+    return;
+  }
+
+  const loader = new Image();
+  loader.crossOrigin = "anonymous";
+  loader.decoding = "async";
+
+  loader.onerror = () => {
+    if (element.dataset.requestKey !== requestKey) {
+      return;
+    }
+    if (options.usePlayerFallback) {
+      applyPlayerFallback(element, alt);
+      return;
+    }
+    element.hidden = true;
+    element.removeAttribute("src");
+  };
+
+  loader.onload = () => {
+    let resolvedSrc = src;
+
+    try {
+      const processedSrc = createTransparentPortraitDataUrl(loader);
+      if (processedSrc) {
+        resolvedSrc = processedSrc;
+      }
+    } catch {
+      resolvedSrc = src;
+    }
+
+    portraitImageCache.set(src, resolvedSrc);
+    applyResolvedImage(element, resolvedSrc, alt, options, requestKey);
+  };
+
+  loader.src = src;
+}
+
+function applyResolvedImage(element, resolvedSrc, alt, options, requestKey) {
+  if (element.dataset.requestKey !== requestKey) {
+    return;
+  }
+
+  element.alt = alt || "";
+  element.onerror = () => {
+    if (element.dataset.requestKey !== requestKey) {
+      return;
+    }
+    if (options.usePlayerFallback) {
+      applyPlayerFallback(element, alt);
+      return;
+    }
+    element.hidden = true;
+    element.removeAttribute("src");
+  };
+  element.src = resolvedSrc;
+  element.hidden = false;
+  element.classList.add("has-image");
+}
+
+// Background removal is intentionally conservative:
+// sample the edge color, flood-fill only border-connected backdrop pixels,
+// then soften edges so hats, hair, and shoulders survive intact.
+function createTransparentPortraitDataUrl(image) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) {
+    return "";
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return "";
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+  const imageData = context.getImageData(0, 0, width, height);
+  const { data } = imageData;
+  const backgroundProfile = samplePortraitBackdropColor(data, width, height);
+
+  if (!backgroundProfile) {
+    return "";
+  }
+
+  const visited = floodFillPortraitBackdrop(data, width, height, backgroundProfile);
+  const clearedPixels = applyPortraitTransparency(data, width, height, backgroundProfile, visited);
+
+  if (clearedPixels < width * height * 0.02) {
+    return "";
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function samplePortraitBackdropColor(data, width, height) {
+  const sampleSize = Math.max(4, Math.floor(Math.min(width, height) * 0.03));
+  const yAnchors = [
+    0,
+    Math.floor(height * 0.25),
+    Math.floor(height * 0.5),
+  ];
+  const windows = [];
+
+  for (const y of yAnchors) {
+    windows.push(...sampleBackdropWindow(data, width, height, 0, y, sampleSize));
+    windows.push(...sampleBackdropWindow(data, width, height, width - sampleSize, y, sampleSize));
+  }
+
+  const validSamples = windows.filter((sample) => sample && sample.alpha > 0);
+  if (!validSamples.length) {
+    return null;
+  }
+
+  const median = {
+    red: medianChannel(validSamples.map((sample) => sample.red)),
+    green: medianChannel(validSamples.map((sample) => sample.green)),
+    blue: medianChannel(validSamples.map((sample) => sample.blue)),
+  };
+
+  const ranked = validSamples
+    .map((sample) => ({ sample, distance: colorDistanceFromSample(sample, median) }))
+    .sort((left, right) => left.distance - right.distance);
+
+  const inliers = ranked
+    .filter(({ distance }) => distance <= 34)
+    .map(({ sample }) => sample);
+
+  const resolvedSamples = inliers.length >= 6
+    ? inliers
+    : ranked.slice(0, Math.min(12, ranked.length)).map(({ sample }) => sample);
+
+  const average = averageBackdropSample(resolvedSamples);
+  const spread = resolvedSamples.length
+    ? Math.max(...resolvedSamples.map((sample) => colorDistanceFromSample(sample, average)))
+    : 0;
+
+  return {
+    red: average.red,
+    green: average.green,
+    blue: average.blue,
+    hardThreshold: Math.max(26, Math.min(42, spread + 10)),
+    softThreshold: Math.max(48, Math.min(68, spread + 28)),
+  };
+}
+
+function sampleBackdropWindow(data, width, height, startX, startY, sampleSize) {
+  const samples = [];
+  const clampedStartX = Math.max(0, Math.min(width - 1, startX));
+  const clampedStartY = Math.max(0, Math.min(height - 1, startY));
+  const endX = Math.min(width, clampedStartX + sampleSize);
+  const endY = Math.min(height, clampedStartY + sampleSize);
+
+  for (let y = clampedStartY; y < endY; y += 1) {
+    for (let x = clampedStartX; x < endX; x += 1) {
+      samples.push(readPixel(data, width, x, y));
+    }
+  }
+
+  return samples;
+}
+
+function medianChannel(values) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+
+  if (!sorted.length) {
+    return 0;
+  }
+
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function averageBackdropSample(samples) {
+  if (!samples.length) {
+    return { red: 0, green: 0, blue: 0 };
+  }
+
+  const total = samples.reduce((accumulator, sample) => {
+    accumulator.red += sample.red;
+    accumulator.green += sample.green;
+    accumulator.blue += sample.blue;
+    return accumulator;
+  }, { red: 0, green: 0, blue: 0 });
+
+  return {
+    red: total.red / samples.length,
+    green: total.green / samples.length,
+    blue: total.blue / samples.length,
+  };
+}
+
+function colorDistanceFromSample(sample, reference) {
+  const redDelta = sample.red - reference.red;
+  const greenDelta = sample.green - reference.green;
+  const blueDelta = sample.blue - reference.blue;
+  return Math.sqrt(redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta);
+}
+
+function floodFillPortraitBackdrop(data, width, height, backgroundProfile) {
+  const hardThreshold = backgroundProfile.hardThreshold;
+  const visited = new Uint8Array(width * height);
+  const queue = [];
+  const seedMaxY = Math.max(8, Math.floor(height * 0.82));
+
+  const tryVisit = (x, y) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return;
+    }
+
+    const index = y * width + x;
+    if (visited[index]) {
+      return;
+    }
+
+    if (!matchesBackdropColor(data, index, backgroundProfile, hardThreshold)) {
+      return;
+    }
+
+    visited[index] = 1;
+    queue.push(index);
+  };
+
+  // Do not seed from the bottom edge. MLB headshots often have neck/jersey
+  // pixels touching the lower border, and starting there can eat into faces.
+  for (let x = 0; x < width; x += 1) {
+    tryVisit(x, 0);
+  }
+
+  for (let y = 0; y < seedMaxY; y += 1) {
+    tryVisit(0, y);
+    tryVisit(width - 1, y);
+  }
+
+  for (let pointer = 0; pointer < queue.length; pointer += 1) {
+    const index = queue[pointer];
+    const x = index % width;
+    const y = Math.floor(index / width);
+
+    tryVisit(x + 1, y);
+    tryVisit(x - 1, y);
+    tryVisit(x, y + 1);
+    tryVisit(x, y - 1);
+  }
+
+  return visited;
+}
+
+function applyPortraitTransparency(data, width, height, backgroundProfile, visited) {
+  const hardThreshold = backgroundProfile.hardThreshold;
+  const softThreshold = backgroundProfile.softThreshold;
+  let clearedPixels = 0;
+
+  for (let index = 0; index < visited.length; index += 1) {
+    if (!visited[index]) {
+      continue;
+    }
+
+    data[index * 4 + 3] = 0;
+    clearedPixels += 1;
+  }
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (visited[index]) {
+        continue;
+      }
+
+      const offset = index * 4;
+      if (data[offset + 3] === 0 || !hasTransparentBackdropNeighbor(visited, width, height, x, y)) {
+        continue;
+      }
+
+      const distance = colorDistance(data, index, backgroundProfile);
+      if (distance > softThreshold) {
+        continue;
+      }
+
+      const normalized = Math.max(0, Math.min(1, (distance - hardThreshold) / (softThreshold - hardThreshold)));
+      data[offset + 3] = Math.min(data[offset + 3], Math.round(normalized * 255));
+    }
+  }
+
+  return clearedPixels;
+}
+
+function hasTransparentBackdropNeighbor(visited, width, height, x, y) {
+  const index = y * width + x;
+  return (
+    visited[index - 1] ||
+    visited[index + 1] ||
+    visited[index - width] ||
+    visited[index + width]
+  );
+}
+
+function matchesBackdropColor(data, index, backgroundColor, threshold) {
+  return colorDistance(data, index, backgroundColor) <= threshold;
+}
+
+function colorDistance(data, index, backgroundColor) {
+  const offset = index * 4;
+  const redDelta = data[offset] - backgroundColor.red;
+  const greenDelta = data[offset + 1] - backgroundColor.green;
+  const blueDelta = data[offset + 2] - backgroundColor.blue;
+  return Math.sqrt(redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta);
+}
+
+function readPixel(data, width, x, y) {
+  const offset = (y * width + x) * 4;
+  return {
+    red: data[offset],
+    green: data[offset + 1],
+    blue: data[offset + 2],
+    alpha: data[offset + 3],
+  };
+}
+
+function dominantBackdropSample(samples) {
+  const validSamples = samples.filter((sample) => sample && sample.alpha > 0);
+  if (!validSamples.length) {
+    return null;
+  }
+
+  const buckets = new Map();
+  for (const sample of validSamples) {
+    const key = [
+      Math.round(sample.red / 8),
+      Math.round(sample.green / 8),
+      Math.round(sample.blue / 8),
+    ].join(":");
+
+    const existing = buckets.get(key) || { count: 0, red: 0, green: 0, blue: 0 };
+    existing.count += 1;
+    existing.red += sample.red;
+    existing.green += sample.green;
+    existing.blue += sample.blue;
+    buckets.set(key, existing);
+  }
+
+  let dominant = null;
+  for (const bucket of buckets.values()) {
+    if (!dominant || bucket.count > dominant.count) {
+      dominant = bucket;
+    }
+  }
+
+  if (!dominant || !dominant.count) {
+    return null;
+  }
+
+  return {
+    red: dominant.red / dominant.count,
+    green: dominant.green / dominant.count,
+    blue: dominant.blue / dominant.count,
+  };
 }
 
 function applyPlayerFallback(element, alt) {
@@ -597,17 +1152,21 @@ function inlineFallbackSilhouette() {
 }
 
 
-function renderLinescore(linescore) {
+// ----- Linescore rendering -----
+
+// The linescore is table-based so it can always show innings 1-9 while still
+// expanding naturally for extra innings.
+function renderLinescore(linescore, options = {}) {
   if (!linescore.length) {
-    elements.linescore.innerHTML = '<div class="linescore-empty">Waiting for inning-by-inning data.</div>';
+    elements.linescore.innerHTML = `<div class="linescore-empty">${escapeHtml(options.emptyMessage || "Waiting for inning-by-inning data.")}</div>`;
     return;
   }
 
-  const awayLabel = state.current?.live?.away?.abbr || state.current?.live?.away?.name || "AWY";
-  const homeLabel = state.current?.live?.home?.abbr || state.current?.live?.home?.name || "HME";
+  const awayLabel = options.awayLabel || state.current?.live?.away?.abbr || state.current?.live?.away?.name || "AWY";
+  const homeLabel = options.homeLabel || state.current?.live?.home?.abbr || state.current?.live?.home?.name || "HME";
   const displayedInnings = buildDisplayedInnings(linescore);
-  const awayTotals = calculateLinescoreTotals(displayedInnings, "away");
-  const homeTotals = calculateLinescoreTotals(displayedInnings, "home");
+  const awayTotals = options.awayTotals || calculateLinescoreTotals(displayedInnings, "away");
+  const homeTotals = options.homeTotals || calculateLinescoreTotals(displayedInnings, "home");
   const activeInning = Number(state.current?.live?.inning) || null;
   const inningHalf = normalizeInningHalf(state.current?.live?.inningHalf);
 
@@ -656,6 +1215,7 @@ function renderLinescore(linescore) {
   `;
 }
 
+// Keep the card visually stable by padding to at least 9 innings.
 function buildDisplayedInnings(linescore) {
   const inningCount = Math.max(9, linescore.length);
   return Array.from({ length: inningCount }, (_, index) => {
@@ -678,6 +1238,7 @@ function buildDisplayedInnings(linescore) {
   });
 }
 
+// Highlight the active half-inning and dim future half-innings.
 function buildLinescoreCellClass(inningNumber, side, activeInning, inningHalf) {
   const classes = ["linescore-cell"];
 
@@ -724,13 +1285,18 @@ function isUnplayedLinescoreCell(inningNumber, side, activeInning, inningHalf) {
   );
 }
 
+// ----- UI-only timers -----
+
+// Countdown and elapsed-time updates are display concerns, so they live on the
+// main thread and tick once per second without involving the worker.
 function restartCountdown(nextState) {
   window.clearInterval(state.countdownTimer);
   updateCountdown(nextState);
 
   const shouldRunCountdown = Boolean(
-    nextState?.nextGame?.countdownTargetMs &&
-    (nextState.mode === "pregame" || nextState.mode === "final")
+    (nextState?.nextGame?.countdownTargetMs &&
+      (nextState.mode === "pregame" || nextState.mode === "final")) ||
+    (nextState?.mode === "live" && nextState?.live?.startTime)
   );
 
   if (!shouldRunCountdown) {
@@ -745,8 +1311,11 @@ function restartCountdown(nextState) {
 function updateCountdown(nextState) {
   if (nextState?.mode === "live") {
     elements.countdown.textContent = "";
+    setElapsedTime(nextState?.live?.startTime || null);
     return;
   }
+
+  setElapsedTime(null);
 
   const countdownTargetMs = nextState?.nextGame?.countdownTargetMs || null;
   const statusText = nextState?.nextGame?.statusText || "";
@@ -768,10 +1337,89 @@ function updateCountdown(nextState) {
 
   const delta = Math.max(0, countdownTargetMs - Date.now());
   const totalSeconds = Math.floor(delta / 1000);
-  const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
-  const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
-  const seconds = String(totalSeconds % 60).padStart(2, "0");
-  elements.countdown.textContent = `${hours}:${minutes}:${seconds}`;
+  elements.countdown.innerHTML = renderLaunchCountdownMarkup(totalSeconds);
+}
+
+function setElapsedTime(startTime) {
+  if (!elements.elapsedTime) {
+    return;
+  }
+
+  const formatted = formatElapsedGameTime(startTime);
+  if (!formatted) {
+    elements.elapsedTime.hidden = true;
+    elements.elapsedTime.innerHTML = "";
+    return;
+  }
+
+  elements.elapsedTime.hidden = false;
+  elements.elapsedTime.innerHTML = `
+    <span class="elapsed-label">Elapsed</span>
+    <span class="elapsed-value">${escapeHtml(formatted)}</span>
+  `;
+}
+
+function formatElapsedGameTime(startTime) {
+  if (!startTime) {
+    return "";
+  }
+
+  const startMs = new Date(startTime).getTime();
+  if (!Number.isFinite(startMs)) {
+    return "";
+  }
+
+  const deltaMs = Math.max(0, Date.now() - startMs);
+  const totalMinutes = Math.floor(deltaMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0) {
+    return `${hours}H ${String(minutes).padStart(2, "0")}M`;
+  }
+
+  return `${Math.max(0, minutes)}M`;
+}
+
+function formatLaunchCountdown(totalSeconds) {
+  const safeSeconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = String(safeSeconds % 60).padStart(2, "0");
+
+  if (hours > 0) {
+    return `-${hours}H ${minutes}M ${seconds}S`;
+  }
+
+  if (minutes > 0) {
+    return `-${minutes}M ${seconds}S`;
+  }
+
+  return `-${seconds}S`;
+}
+
+function renderLaunchCountdownMarkup(totalSeconds) {
+  const safeSeconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = String(safeSeconds % 60).padStart(2, "0");
+  const segments = [];
+
+  if (hours > 0) {
+    segments.push({ value: String(hours), unit: "H" });
+  }
+
+  if (hours > 0 || minutes > 0) {
+    segments.push({ value: String(minutes), unit: "M" });
+  }
+
+  segments.push({ value: seconds, unit: "S" });
+
+  const segmentMarkup = segments
+    .map((segment) => `<span class="countdown-segment"><span class="countdown-value">${escapeHtml(segment.value)}</span><span class="countdown-unit">${segment.unit}</span></span>`)
+    .join("");
+
+  return `<span class="countdown-launch" aria-label="${escapeHtml(formatLaunchCountdown(safeSeconds))}"><span class="countdown-sign">-</span>${segmentMarkup}</span>`;
 }
 
 function renderBannerFromState(nextState) {
@@ -813,6 +1461,39 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatScheduleWeekday(value) {
+  if (!value) {
+    return "---";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+  }).format(new Date(value)).toUpperCase();
+}
+
+function formatScheduleDayNumber(value) {
+  if (!value) {
+    return "--";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+  }).format(new Date(value));
+}
+
+function formatScheduleTime(value, statusText = "") {
+  if (isSpecialPregameStatus(statusText)) {
+    return statusCountdownLabel(statusText);
+  }
+
+  if (!value) {
+    return "TBD";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 function formatTimestamp(value) {
   if (!value) {
     return "Waiting for update";
@@ -835,6 +1516,45 @@ function formatTimestampForClock(value) {
   }).format(new Date(value));
 }
 
+function formatInningState(inningHalf, inning) {
+  const half = String(inningHalf || "").trim();
+  const numericInning = Number(inning);
+
+  if (!half && !numericInning) {
+    return "";
+  }
+
+  if (!numericInning) {
+    return half;
+  }
+
+  return `${half} ${formatOrdinal(numericInning)}`.trim();
+}
+
+function formatOrdinal(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return String(value || "");
+  }
+
+  const mod100 = number % 100;
+  if (mod100 >= 11 && mod100 <= 13) {
+    return `${number}th`;
+  }
+
+  const mod10 = number % 10;
+  if (mod10 === 1) {
+    return `${number}st`;
+  }
+  if (mod10 === 2) {
+    return `${number}nd`;
+  }
+  if (mod10 === 3) {
+    return `${number}rd`;
+  }
+  return `${number}th`;
+}
+
 function basesText(bases) {
   if (!bases) {
     return "Bases unknown";
@@ -855,8 +1575,27 @@ function pitchCountText(value) {
   return typeof value === "number" ? `Pitches: ${value}` : "";
 }
 
-function pitchHandSuffix(value) {
-  return value ? ` | Throws: ${value}` : "";
+function formatPitchHandLong(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "R") {
+    return "Right";
+  }
+  if (normalized === "L") {
+    return "Left";
+  }
+  if (normalized === "S") {
+    return "Switch";
+  }
+  return value || "";
+}
+
+function buildProbablePitcherMeta(teamName, roleLabel, throwsValue) {
+  const lines = [`${teamName || "Team"} ${roleLabel}`];
+  const fullHand = formatPitchHandLong(throwsValue);
+  if (fullHand) {
+    lines.push(`Throws: ${fullHand}`);
+  }
+  return lines.join("\n");
 }
 
 function resolveProbablePitcherName(pitcher, teamName) {
@@ -900,6 +1639,14 @@ function calculateLinescoreTotals(linescore, side) {
   };
 }
 
+function buildFixedLinescoreTotals(score, hits = null, errors = null) {
+  return {
+    runs: score ?? "-",
+    hits: hits ?? "-",
+    errors: errors ?? "-",
+  };
+}
+
 function renderDebugState(nextState) {
   if (!elements.debugOutput) {
     return;
@@ -910,11 +1657,14 @@ function renderDebugState(nextState) {
     workerStatus: state.debug.workerStatus,
     lastWorkerError: state.debug.lastWorkerError,
     mode: nextState?.mode || null,
-    status: nextState?.live?.status || nextState?.final?.summary || null,
-    team: nextState?.team || null,
-    nextGame: nextState?.nextGame || null,
-    probablePitchers: nextState?.nextGame?.probablePitchers || null,
-    meta: nextState?.meta || null,
+      status: nextState?.live?.status || nextState?.final?.summary || null,
+      team: nextState?.team || null,
+      nextGame: nextState?.nextGame || null,
+      upcomingSchedule: nextState?.upcomingSchedule || null,
+      previousGame: nextState?.previousGame || null,
+      probablePitchers: nextState?.nextGame?.probablePitchers || null,
+      celebration: nextState?.live?.celebration || null,
+      meta: nextState?.meta || null,
   };
 
   elements.debugOutput.textContent = JSON.stringify(debugState, null, 2);
@@ -940,22 +1690,27 @@ function setFooterSlots(slot1, slot2, slot3) {
   }
 }
 
-function setLiveLayout(isLive) {
+// ----- Shared UI helpers -----
+
+function setStateLayout(mode) {
+  const isLive = mode === "live";
   if (elements.heroFooter) {
-    elements.heroFooter.hidden = isLive;
-    elements.heroFooter.classList.toggle("is-hidden", isLive);
+    elements.heroFooter.hidden = true;
+    elements.heroFooter.classList.add("is-hidden");
   }
   if (elements.matchupGrid) {
-    elements.matchupGrid.hidden = isLive;
-    elements.matchupGrid.classList.toggle("is-hidden", isLive);
+    elements.matchupGrid.hidden = true;
+    elements.matchupGrid.classList.add("is-hidden");
   }
   if (elements.detailsGrid) {
-    elements.detailsGrid.classList.toggle("details-grid-live", isLive);
+    elements.detailsGrid.classList.add("details-grid-live");
   }
   if (elements.awaySide) {
+    elements.awaySide.classList.add("score-side-compact");
     elements.awaySide.classList.toggle("score-side-live", isLive);
   }
   if (elements.homeSide) {
+    elements.homeSide.classList.add("score-side-compact");
     elements.homeSide.classList.toggle("score-side-live", isLive);
   }
 }
@@ -995,17 +1750,21 @@ function statusCountdownLabel(value) {
 }
 
 function formatPregameStatusDetail(game) {
-  const location = game?.isHome ? "Home Game" : "Road Game";
-  const startTime = game?.startTime ? formatDateTime(game.startTime) : "Time TBD";
-  return `${location} | ${startTime}`;
+  return buildPregameDetailMarkup(game);
 }
 
-function setMiniBases(bases) {
+// The mini-diamond shows both runner occupancy and the three outs dots.
+function setMiniBases(bases, outs = 0) {
   if (!elements.basesMini) {
     return;
   }
 
   elements.basesMini.classList.toggle("is-visible", Boolean(bases));
+
+  const dots = elements.basesMini.querySelectorAll(".base-dot");
+  dots.forEach((dot, index) => {
+    dot.classList.toggle("is-active", index < Number(outs || 0));
+  });
 
   const diamond = elements.basesMini.querySelector(".base-diamond");
   if (!diamond) {
@@ -1036,6 +1795,7 @@ function assignLiveRoleCards(live) {
   setLiveRoleCard("home", homeBatting ? buildLiveRoleConfig("At Bat", live?.batter, "batter") : buildLiveRoleConfig("Pitching", live?.pitcher, "pitcher"));
 }
 
+// These hero-side cards are compact versions of the larger player cards.
 function buildLiveRoleConfig(label, player, kind) {
   if (!player) {
     return {
@@ -1047,18 +1807,18 @@ function buildLiveRoleConfig(label, player, kind) {
     };
   }
 
-  return {
-    label,
-    photo: player.photo || "",
-    name: player.name || (kind === "batter" ? "Batter unavailable" : "Pitcher unavailable"),
-    meta: kind === "batter"
-      ? [player.position, handednessLabel("Bats", player.bats)].filter(Boolean).join(" | ")
-      : [handednessLabel("Throws", player.throws), pitchCountText(player.pitchCount)].filter(Boolean).join(" | "),
-    stats: kind === "batter"
-      ? buildBatterStatsConfig(player, { compact: true })
-      : buildPitcherStatsConfig(player, { compact: true, includeToday: true }),
-  };
-}
+    return {
+      label,
+      photo: player.photo || "",
+      name: player.name || (kind === "batter" ? "Batter unavailable" : "Pitcher unavailable"),
+      meta: kind === "batter"
+        ? [player.position, handednessLabel("Bats", player.bats)].filter(Boolean).join(" | ")
+        : [handednessLabel("Throws", player.throws), pitchCountText(player.pitchCount)].filter(Boolean).join(" | "),
+      stats: kind === "batter"
+        ? buildBatterStatsConfig(player, { compact: true, hideSummaryLabel: true })
+        : buildPitcherStatsConfig(player, { compact: true, includeToday: true, hideSummaryLabel: true }),
+    };
+  }
 
 function setLiveRoleCard(side, config) {
   const isAway = side === "away";
@@ -1116,6 +1876,10 @@ function capitalize(value) {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : "";
 }
 
+// ----- Watermark logo system -----
+
+// Team watermarks are CSS-driven. This helper passes the logo URL plus a small
+// amount of per-team tuning through CSS custom properties.
 function setSideWatermark(element, src, side = "") {
   if (!element) {
     return;
@@ -1123,15 +1887,224 @@ function setSideWatermark(element, src, side = "") {
 
   element.classList.remove("has-watermark", "watermark-left", "watermark-right");
   element.style.removeProperty("--side-logo");
+  element.style.removeProperty("--side-watermark-position");
+  element.style.removeProperty("--side-watermark-opacity");
 
   if (!src) {
     return;
   }
 
   element.style.setProperty("--side-logo", `url("${src}")`);
+  const teamId = extractTeamIdFromLogoUrl(src);
+  element.style.setProperty("--side-watermark-position", buildWatermarkPosition(teamId, side));
+  element.style.setProperty("--side-watermark-opacity", String(buildWatermarkOpacity(teamId)));
   element.classList.add("has-watermark");
 
   if (side === "left" || side === "right") {
     element.classList.add(`watermark-${side}`);
   }
 }
+
+function extractTeamIdFromLogoUrl(src) {
+  const match = String(src || "").match(/team-logos\/(\d+)\.svg/i);
+  return match ? Number(match[1]) : null;
+}
+
+// Some logos are dense and round; others are thin outline marks. Keep team-
+// specific watermark tuning in one place so visual tweaks stay reviewable.
+const WATERMARK_PROFILES = new Map([
+  [108, { opacity: 0.088, inset: 54 }], // Angels
+  [109, { opacity: 0.058 }], // Diamondbacks
+  [110, { opacity: 0.058 }], // Orioles
+  [111, { opacity: 0.09, inset: 48 }], // Red Sox
+  [112, { opacity: 0.05 }], // Cubs
+  [113, { opacity: 0.092 }], // Reds
+  [114, { opacity: 0.115, inset: 56 }], // Guardians
+  [115, { opacity: 0.068 }], // Rockies
+  [116, { opacity: 0.1, inset: 48 }], // Tigers
+  [117, { opacity: 0.055 }], // Astros
+  [118, { opacity: 0.065 }], // Royals
+  [119, { opacity: 0.09 }], // Dodgers
+  [120, { opacity: 0.08 }], // Nationals
+  [121, { opacity: 0.085 }], // Mets
+  [133, { opacity: 0.056 }], // Athletics
+  [134, { opacity: 0.1 }], // Pirates
+  [135, { opacity: 0.09 }], // Padres
+  [136, { opacity: 0.115, inset: 58 }], // Mariners
+  [137, { opacity: 0.095 }], // Giants
+  [138, { opacity: 0.092, inset: 44 }], // Cardinals
+  [139, { opacity: 0.055 }], // Rays
+  [140, { opacity: 0.088 }], // Rangers
+  [141, { opacity: 0.05 }], // Blue Jays
+  [142, { opacity: 0.072 }], // Twins
+  [143, { opacity: 0.086, inset: 50 }], // Phillies
+  [144, { opacity: 0.105, inset: 64 }], // Braves
+  [145, { opacity: 0.105 }], // White Sox
+  [146, { opacity: 0.062 }], // Marlins
+  [147, { opacity: 0.08 }], // Yankees
+]);
+
+function buildWatermarkPosition(teamId, side) {
+  const defaultPosition = side === "left" ? "left center" : side === "right" ? "right center" : "center center";
+  const profile = WATERMARK_PROFILES.get(teamId);
+
+  if (profile?.inset) {
+    const inset = profile.inset;
+    return side === "left" ? `${inset}px center` : side === "right" ? `calc(100% - ${inset}px) center` : defaultPosition;
+  }
+
+  return defaultPosition;
+}
+
+function buildWatermarkOpacity(teamId) {
+  return WATERMARK_PROFILES.get(teamId)?.opacity || 0.05;
+}
+
+function setNotesMeta(leftLabel, leftValue, rightLabel, rightValue) {
+  if (elements.notesMetaRow) {
+    elements.notesMetaRow.hidden = false;
+  }
+  setNotesMetaSlot(elements.notesMeta1, elements.notesMeta1Label, elements.teamProbable, leftLabel, leftValue);
+  setNotesMetaSlot(elements.notesMeta2, elements.notesMeta2Label, elements.opponentProbable, rightLabel, rightValue);
+}
+
+function setNotesTitle(value) {
+  if (!elements.notesLabel) {
+    return;
+  }
+  elements.notesLabel.textContent = value || "Game Notes";
+}
+
+function hideUpcomingSchedule() {
+  if (!elements.upcomingSchedule) {
+    return;
+  }
+  elements.upcomingSchedule.hidden = true;
+  elements.upcomingSchedule.innerHTML = "";
+}
+
+// Pregame schedule items stay intentionally compact so the user can see the
+// next few dates without introducing horizontal scroll.
+function renderUpcomingSchedule(scheduleItems) {
+  setNotesTitle("Upcoming Schedule");
+  hideUpcomingSchedule();
+
+  if (elements.notesMetaRow) {
+    elements.notesMetaRow.hidden = true;
+  }
+
+  if (elements.recentPlay) {
+    elements.recentPlay.textContent = "";
+    elements.recentPlay.hidden = true;
+  }
+
+  if (!elements.upcomingSchedule) {
+    return;
+  }
+
+  const items = Array.isArray(scheduleItems) ? scheduleItems.slice(0, 5) : [];
+
+  if (!items.length) {
+    elements.upcomingSchedule.hidden = false;
+    elements.upcomingSchedule.innerHTML = '<div class="schedule-empty">No additional games scheduled in this window.</div>';
+    return;
+  }
+
+  elements.upcomingSchedule.hidden = false;
+  elements.upcomingSchedule.innerHTML = `
+    <div class="schedule-strip" style="--schedule-columns: ${Math.max(items.length, 1)};">
+      ${items.map((item) => renderScheduleItem(item)).join("")}
+    </div>
+  `;
+}
+
+function renderScheduleItem(item) {
+  const weekday = formatScheduleWeekday(item?.startTime);
+  const day = formatScheduleDayNumber(item?.startTime);
+  const time = formatScheduleTime(item?.startTime, item?.statusText);
+  const opponentName = item?.opponentName || "Opponent";
+  const siteLabel = item?.isHome ? "vs" : "@";
+  const logo = escapeHtml(item?.opponentLogoUrl || "");
+  const alt = escapeHtml(`${opponentName} logo`);
+
+  return `
+    <article class="schedule-item">
+      <p class="schedule-item-date">
+        <span class="schedule-item-weekday">${weekday}</span>
+        <span class="schedule-item-day">${day}</span>
+      </p>
+      <p class="schedule-item-site">${siteLabel}</p>
+      <div class="schedule-item-logo-wrap">
+        ${logo ? `<img class="schedule-item-logo" src="${logo}" alt="${alt}">` : `<div class="schedule-item-logo schedule-item-logo-placeholder" aria-hidden="true"></div>`}
+      </div>
+      <p class="schedule-item-time">${time}</p>
+    </article>
+  `;
+}
+
+function setLinescoreLabel(value) {
+  if (!elements.linescoreLabel) {
+    return;
+  }
+  elements.linescoreLabel.textContent = value || "Linescore";
+}
+
+function setNotesMetaSlot(wrapper, labelElement, valueElement, label, value) {
+  if (!wrapper || !labelElement || !valueElement) {
+    return;
+  }
+
+  labelElement.textContent = label || "";
+  valueElement.textContent = value || "";
+  wrapper.hidden = !(label || value);
+}
+
+function setScoreValue(element, value, mode = "score") {
+  if (!element) {
+    return;
+  }
+
+  element.textContent = value || "";
+  element.classList.toggle("score-value-record", mode === "record");
+}
+
+function buildProbablePitcherCardConfig(pitcher, teamName) {
+  if (!pitcher && !teamName) {
+    return null;
+  }
+
+  return {
+    label: "Probable",
+    photo: pitcher?.photo || "",
+    name: resolveProbablePitcherName(pitcher, teamName),
+    meta: buildProbablePitcherMeta(teamName, "probable starter", pitcher?.throws),
+    stats: buildPitcherStatsConfig(pitcher),
+  };
+}
+
+function formatPregameCountdownDetail(game) {
+  return buildPregameDetailMarkup(game);
+}
+
+function buildPregameDetailMarkup(game) {
+  const location = escapeHtml(game?.isHome ? "Home Game" : "Road Game");
+  const startTime = escapeHtml(game?.startTime ? formatDateTime(game.startTime) : "Time TBD");
+  return `
+    <span class="pregame-detail-line pregame-detail-location">${location}</span>
+    <span class="pregame-detail-line pregame-detail-time">${startTime}</span>
+  `;
+}
+
+function buildPreviousGameLabel(previousGame) {
+  if (!previousGame) {
+    return "Previous Game Final";
+  }
+
+  const away = previousGame.away?.abbr || previousGame.away?.name || "Away";
+  const home = previousGame.home?.abbr || previousGame.home?.name || "Home";
+  return `Previous Game Final | ${away} at ${home}`;
+}
+
+// Keep startup at the end of the module so every helper and constant above is
+// initialized before the first render can call into them.
+init();
