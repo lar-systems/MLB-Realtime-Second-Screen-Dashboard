@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2026-04-15-2255">
+  <link rel="stylesheet" href="styles.css?v=2026-04-16-0119">
 </head>
 <body>
   <div class="app-shell">
@@ -180,6 +180,14 @@
         </article>
       </section>
 
+      <section id="active-games-panel" class="panel active-games-panel" hidden>
+        <div class="panel-header">
+          <p class="section-label">Other Active Games</p>
+          <p id="active-games-meta" class="active-games-meta"></p>
+        </div>
+        <div id="active-games-strip" class="active-games-strip"></div>
+      </section>
+
     </main>
 
     <div class="dashboard-actions" aria-label="Dashboard utility controls">
@@ -192,6 +200,7 @@
       >
         Show Debug
       </button>
+      <button id="cycle-action-button" class="dashboard-action-button" type="button">Cycle Action Events</button>
       <button id="cycle-mode-button" class="dashboard-action-button" type="button">Cycle Test States</button>
     </div>
 
@@ -208,6 +217,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=2026-04-15-2235" type="module"></script>
+  <script src="app.js?v=2026-04-16-0119" type="module"></script>
   </body>
   </html>

@@ -246,15 +246,19 @@ select {
 
 /* Hero scoreboard layout */
 .celebration-modal {
-  position: absolute;
-  inset: 58px 22px 22px;
+  position: fixed;
+  inset: 0;
   display: grid;
   place-items: center;
+  padding: max(24px, 10vh) max(18px, 10vw);
+  background: rgba(2, 6, 11, 0.34);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   opacity: 0;
   pointer-events: none;
   transform: translateY(10px) scale(0.98);
   transition: opacity 320ms ease, transform 320ms ease;
-  z-index: 6;
+  z-index: 30;
 }
 
 .celebration-modal.is-visible {
@@ -269,10 +273,14 @@ select {
 
 .celebration-card {
   display: grid;
+  align-content: center;
   justify-items: center;
-  gap: 6px;
-  min-width: min(100%, 520px);
-  padding: 18px 24px;
+  gap: clamp(12px, 2.6vh, 30px);
+  width: min(80vw, 1600px);
+  height: 80vh;
+  max-width: 100%;
+  max-height: 100%;
+  padding: clamp(28px, 4vw, 72px);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 4px;
   background:
@@ -302,8 +310,8 @@ select {
 
 .celebration-label {
   font-family: "Barlow Condensed", sans-serif;
-  font-size: clamp(3rem, 8vw, 5.6rem);
-  line-height: 0.9;
+  font-size: clamp(4.6rem, 13vw, 12rem);
+  line-height: 0.86;
   color: var(--text);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -312,7 +320,7 @@ select {
 
 .celebration-detail {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: clamp(0.95rem, 1.9vw, 1.35rem);
+  font-size: clamp(1.3rem, 3vw, 2.8rem);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
@@ -320,7 +328,8 @@ select {
 }
 
 .celebration-actor {
-  font-size: clamp(1rem, 2.2vw, 1.4rem);
+  font-size: clamp(1.8rem, 4vw, 3.6rem);
+  line-height: 1.05;
   color: rgba(243, 247, 251, 0.92);
   text-shadow: var(--text-shadow-soft);
 }
@@ -794,7 +803,8 @@ select {
 /* Lower layout rows */
 .hero-footer,
 .matchup-grid,
-.details-grid {
+.details-grid,
+.active-games-panel {
   margin-top: 10px;
 }
 
@@ -826,6 +836,102 @@ select {
 
 .details-grid-live {
   margin-top: 2px;
+}
+
+.active-games-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.active-games-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(190px, 1fr);
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.active-game-card {
+  width: 100%;
+  min-height: 126px;
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.active-game-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(var(--accent-contrast-rgb), 0.55);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.active-game-card:focus-visible {
+  outline: 2px solid rgba(var(--accent-contrast-rgb), 0.96);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18);
+}
+
+.active-game-card-header,
+.active-game-team-row,
+.active-game-team-label {
+  display: flex;
+  align-items: center;
+}
+
+.active-game-card-header,
+.active-game-team-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.active-game-card-status,
+.active-game-card-action {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.active-game-card-action {
+  text-align: right;
+}
+
+.active-game-card-body {
+  display: grid;
+  gap: 10px;
+}
+
+.active-game-team-label {
+  gap: 8px;
+  min-width: 0;
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 1.4rem;
+  line-height: 0.92;
+}
+
+.active-game-team-logo {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.active-game-team-score {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 1.55rem;
+  line-height: 1;
+  color: var(--accent);
 }
 
 /* Player cards */
@@ -1194,6 +1300,13 @@ select {
   text-align: left;
 }
 
+.linescore-team-label.is-winner {
+  background: #5f470f;
+  border-color: rgba(248, 228, 169, 0.38);
+  color: #f8f3e2;
+  box-shadow: inset 0 0 0 1px rgba(255, 240, 194, 0.12);
+}
+
 .linescore-team-spacer {
   min-width: 72px;
   background: transparent;
@@ -1351,6 +1464,10 @@ select {
 
   .details-grid {
     grid-template-columns: 1fr;
+  }
+
+  .active-games-strip {
+    grid-auto-columns: minmax(170px, 1fr);
   }
 
   .live-side-card {

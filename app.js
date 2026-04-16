@@ -86,6 +86,21 @@ const TEAM_THEMES = new Map([
   [158, { primary: "#12284B", secondary: "#FFC52F", accent: "#FFC52F" }], // Brewers
 ]);
 
+const DEBUG_ACTION_EVENTS = [
+  { key: "ball", label: "BALL", detail: "3rd ball", tone: "batter", actorRole: "batter" },
+  { key: "strike", label: "STRIKE", detail: "2nd strike", tone: "pitcher", actorRole: "pitcher" },
+  { key: "out", label: "OUT", detail: "2nd out", tone: "pitcher", actorRole: "pitcher" },
+  { key: "walk", label: "WALK", detail: "2nd walk", tone: "batter", actorRole: "batter" },
+  { key: "hit", label: "HIT", detail: "1st hit", tone: "batter", actorRole: "batter" },
+  { key: "single", label: "SINGLE", detail: "1st single", tone: "batter", actorRole: "batter" },
+  { key: "double", label: "DOUBLE", detail: "1st double", tone: "batter", actorRole: "batter" },
+  { key: "triple", label: "TRIPLE", detail: "1st triple", tone: "batter", actorRole: "batter" },
+  { key: "home_run", label: "HOME RUN", detail: "1st home run", tone: "batter", actorRole: "batter" },
+  { key: "rbi", label: "RBI", detail: "2nd rbi", tone: "batter", actorRole: "batter" },
+  { key: "run", label: "RUN", detail: "1st run", tone: "batter", actorRole: "batter" },
+  { key: "strikeout", label: "STRIKEOUT", detail: "6th strikeout", tone: "pitcher", actorRole: "pitcher" },
+];
+
 const state = {
   worker: null,
   countdownTimer: null,
@@ -99,7 +114,9 @@ const state = {
     workerStatus: "not started",
     lastWorkerError: null,
     isVisible: false,
-    appVersion: "debug-2026-04-15-2235",
+    actionEventIndex: -1,
+    actionEventCounter: 0,
+    appVersion: "debug-2026-04-16-0054",
   },
 };
 
@@ -116,6 +133,7 @@ const elements = {
   teamTitle: document.querySelector("#team-title"),
   teamSelect: document.querySelector("#team-select"),
   cycleModeButton: document.querySelector("#cycle-mode-button"),
+  cycleActionButton: document.querySelector("#cycle-action-button"),
   debugToggleButton: document.querySelector("#debug-toggle-button"),
   debugPanel: document.querySelector("#debug-panel"),
   statusBanner: document.querySelector("#status-banner"),
@@ -163,6 +181,9 @@ const elements = {
   heroFooter: document.querySelector("#hero-footer"),
   matchupGrid: document.querySelector("#matchup-grid"),
   detailsGrid: document.querySelector("#details-grid"),
+  activeGamesPanel: document.querySelector("#active-games-panel"),
+  activeGamesMeta: document.querySelector("#active-games-meta"),
+  activeGamesStrip: document.querySelector("#active-games-strip"),
   batterPhoto: document.querySelector("#batter-photo"),
   leftCardLabel: document.querySelector("#left-card-label"),
   batterName: document.querySelector("#batter-name"),
@@ -208,14 +229,24 @@ function populateTeamSelect() {
   elements.teamSelect.value = String(savedTeamId);
 }
 
+function handleTeamSelection(teamId) {
+  const resolvedTeamId = Number(teamId);
+  if (!Number.isFinite(resolvedTeamId)) {
+    return;
+  }
+
+  elements.teamSelect.value = String(resolvedTeamId);
+  localStorage.setItem(STORAGE_KEYS.teamId, String(resolvedTeamId));
+  applyTeamTheme(resolvedTeamId);
+
+  if (state.worker) {
+    state.worker.postMessage({ type: "SET_TEAM", teamId: resolvedTeamId });
+  }
+}
+
 function bindEvents() {
   elements.teamSelect.addEventListener("change", () => {
-    const teamId = Number(elements.teamSelect.value);
-    localStorage.setItem(STORAGE_KEYS.teamId, String(teamId));
-    applyTeamTheme(teamId);
-    if (state.worker) {
-      state.worker.postMessage({ type: "SET_TEAM", teamId });
-    }
+    handleTeamSelection(Number(elements.teamSelect.value));
   });
 
   elements.cycleModeButton.addEventListener("click", () => {
@@ -224,8 +255,29 @@ function bindEvents() {
     }
   });
 
+  elements.cycleActionButton?.addEventListener("click", () => {
+    cycleDebugActionEvent();
+  });
+
   elements.debugToggleButton.addEventListener("click", () => {
     setDebugVisibility(!state.debug.isVisible);
+  });
+
+  elements.activeGamesStrip?.addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest("[data-home-team-id]")
+      : null;
+
+    if (!button) {
+      return;
+    }
+
+    const teamId = Number(button.getAttribute("data-home-team-id"));
+    if (!Number.isFinite(teamId)) {
+      return;
+    }
+
+    handleTeamSelection(teamId);
   });
 }
 
@@ -345,6 +397,7 @@ function renderState(nextState) {
     renderFinal(nextState);
   }
 
+  renderActiveGames(nextState);
   syncCelebration(nextState);
   restartCountdown(nextState);
 }
@@ -507,6 +560,38 @@ function syncCelebration(nextState) {
   showCelebration(celebration);
 }
 
+function cycleDebugActionEvent() {
+  state.debug.actionEventIndex = (state.debug.actionEventIndex + 1) % DEBUG_ACTION_EVENTS.length;
+  const eventConfig = DEBUG_ACTION_EVENTS[state.debug.actionEventIndex];
+  if (!eventConfig) {
+    return;
+  }
+
+  const celebration = buildDebugActionCelebration(eventConfig);
+  state.celebration.lastSeenId = celebration.id;
+  showCelebration(celebration);
+}
+
+function buildDebugActionCelebration(eventConfig) {
+  state.debug.actionEventCounter += 1;
+
+  return {
+    id: `debug-action:${eventConfig.key}:${state.debug.actionEventCounter}`,
+    label: eventConfig.label,
+    detail: eventConfig.detail,
+    actor: resolveDebugActionActor(eventConfig.actorRole),
+    tone: eventConfig.tone,
+  };
+}
+
+function resolveDebugActionActor(actorRole) {
+  if (actorRole === "pitcher") {
+    return state.current?.live?.pitcher?.name || "Current Pitcher";
+  }
+
+  return state.current?.live?.batter?.name || "Current Batter";
+}
+
 function showCelebration(celebration) {
   if (!elements.celebrationModal || !elements.celebrationCard) {
     return;
@@ -625,6 +710,8 @@ function renderPregame(nextState) {
     homeLabel: previousGame?.home?.abbr || previousGame?.home?.name || "HME",
     awayTotals: buildFixedLinescoreTotals(previousGame?.awayScore, previousGame?.awayHits, previousGame?.awayErrors),
     homeTotals: buildFixedLinescoreTotals(previousGame?.homeScore, previousGame?.homeHits, previousGame?.homeErrors),
+    awayLabelClass: buildPreviousGameWinnerLabelClass(previousGame, "away"),
+    homeLabelClass: buildPreviousGameWinnerLabelClass(previousGame, "home"),
     emptyMessage: "Waiting for previous game linescore.",
   });
 }
@@ -1311,6 +1398,8 @@ function renderLinescore(linescore, options = {}) {
   const displayedInnings = buildDisplayedInnings(linescore);
   const awayTotals = options.awayTotals || calculateLinescoreTotals(displayedInnings, "away");
   const homeTotals = options.homeTotals || calculateLinescoreTotals(displayedInnings, "home");
+  const awayLabelClass = options.awayLabelClass ? ` ${options.awayLabelClass}` : "";
+  const homeLabelClass = options.homeLabelClass ? ` ${options.homeLabelClass}` : "";
   const activeInning = Number(state.current?.live?.inning) || null;
   const inningHalf = normalizeInningHalf(state.current?.live?.inningHalf);
 
@@ -1340,14 +1429,14 @@ function renderLinescore(linescore, options = {}) {
         </thead>
         <tbody>
           <tr>
-            <th scope="row" class="linescore-team-label">${awayLabel}</th>
+            <th scope="row" class="linescore-team-label${awayLabelClass}">${awayLabel}</th>
             ${awayCells}
             <td class="linescore-total-cell">${awayTotals.runs}</td>
             <td class="linescore-total-cell">${awayTotals.hits}</td>
             <td class="linescore-total-cell">${awayTotals.errors}</td>
           </tr>
           <tr>
-            <th scope="row" class="linescore-team-label">${homeLabel}</th>
+            <th scope="row" class="linescore-team-label${homeLabelClass}">${homeLabel}</th>
             ${homeCells}
             <td class="linescore-total-cell">${homeTotals.runs}</td>
             <td class="linescore-total-cell">${homeTotals.hits}</td>
@@ -1791,6 +1880,22 @@ function buildFixedLinescoreTotals(score, hits = null, errors = null) {
   };
 }
 
+function buildPreviousGameWinnerLabelClass(previousGame, side) {
+  const winnerSide = resolveWinningLinescoreSide(previousGame?.awayScore, previousGame?.homeScore);
+  return winnerSide === side ? "is-winner" : "";
+}
+
+function resolveWinningLinescoreSide(awayScore, homeScore) {
+  const awayRuns = Number(awayScore);
+  const homeRuns = Number(homeScore);
+
+  if (!Number.isFinite(awayRuns) || !Number.isFinite(homeRuns) || awayRuns === homeRuns) {
+    return null;
+  }
+
+  return awayRuns > homeRuns ? "away" : "home";
+}
+
 function renderDebugState(nextState) {
   if (!elements.debugOutput) {
     return;
@@ -1804,6 +1909,7 @@ function renderDebugState(nextState) {
       status: nextState?.live?.status || nextState?.final?.summary || null,
       team: nextState?.team || null,
       nextGame: nextState?.nextGame || null,
+      activeGames: nextState?.activeGames || null,
       upcomingSchedule: nextState?.upcomingSchedule || null,
       previousGame: nextState?.previousGame || null,
       probablePitchers: nextState?.nextGame?.probablePitchers || null,
@@ -2159,6 +2265,76 @@ function renderUpcomingSchedule(scheduleItems) {
     <div class="schedule-strip" style="--schedule-columns: ${Math.max(items.length, 1)};">
       ${items.map((item) => renderScheduleItem(item)).join("")}
     </div>
+  `;
+}
+
+function renderActiveGames(nextState) {
+  if (!elements.activeGamesPanel || !elements.activeGamesStrip) {
+    return;
+  }
+
+  const currentGamePk = nextState?.live?.gamePk || nextState?.nextGame?.gamePk || nextState?.final?.gamePk || null;
+  const items = (Array.isArray(nextState?.activeGames) ? nextState.activeGames : [])
+    .filter((game) => game?.gamePk && game.gamePk !== currentGamePk);
+
+  if (!items.length) {
+    elements.activeGamesPanel.hidden = true;
+    elements.activeGamesStrip.innerHTML = "";
+    if (elements.activeGamesMeta) {
+      elements.activeGamesMeta.textContent = "";
+    }
+    return;
+  }
+
+  elements.activeGamesPanel.hidden = false;
+  if (elements.activeGamesMeta) {
+    elements.activeGamesMeta.textContent = `${items.length} game${items.length === 1 ? "" : "s"} live elsewhere`;
+  }
+
+  elements.activeGamesStrip.innerHTML = items.map((item) => renderActiveGameCard(item)).join("");
+}
+
+function renderActiveGameCard(item) {
+  const homeTeamId = Number(item?.homeTeamId);
+  const awayName = item?.away?.name || "Away";
+  const homeName = item?.home?.name || "Home";
+  const awayAbbr = escapeHtml(item?.away?.abbr || awayName);
+  const homeAbbr = escapeHtml(item?.home?.abbr || homeName);
+  const awayLogo = escapeHtml(item?.away?.logoUrl || "");
+  const homeLogo = escapeHtml(item?.home?.logoUrl || "");
+  const awayScore = escapeHtml(String(item?.away?.score ?? "-"));
+  const homeScore = escapeHtml(String(item?.home?.score ?? "-"));
+  const status = escapeHtml(item?.status || "Live");
+  const label = escapeHtml(`Open ${homeName} dashboard`);
+
+  return `
+    <button
+      class="active-game-card"
+      type="button"
+      data-home-team-id="${Number.isFinite(homeTeamId) ? homeTeamId : ""}"
+      aria-label="${label}"
+    >
+      <div class="active-game-card-header">
+        <span class="active-game-card-status">${status}</span>
+        <span class="active-game-card-action">Home Team</span>
+      </div>
+      <div class="active-game-card-body">
+        <div class="active-game-team-row">
+          <div class="active-game-team-label">
+            ${awayLogo ? `<img class="active-game-team-logo" src="${awayLogo}" alt="${escapeHtml(`${awayName} logo`)}">` : ""}
+            <span>${awayAbbr}</span>
+          </div>
+          <span class="active-game-team-score">${awayScore}</span>
+        </div>
+        <div class="active-game-team-row">
+          <div class="active-game-team-label">
+            ${homeLogo ? `<img class="active-game-team-logo" src="${homeLogo}" alt="${escapeHtml(`${homeName} logo`)}">` : ""}
+            <span>${homeAbbr}</span>
+          </div>
+          <span class="active-game-team-score">${homeScore}</span>
+        </div>
+      </div>
+    </button>
   `;
 }
 

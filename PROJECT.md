@@ -4,7 +4,7 @@
 MLB Second-Screen Dashboard
 
 ## Current Status
-Phase 0 and Phase 1 are complete. Phase 2 is mostly in place, Phase 3/4 have begun with a real MLB worker fetch path, and Phase 9 polish now includes bottom-screen utility controls plus accessible local team theming.
+Phase 0 and Phase 1 are complete. Phase 2 is mostly in place, Phase 3/4 have begun with a real MLB worker fetch path, and Phase 9 polish now includes bottom-screen utility controls, accessible local team theming, and a full-width out-of-town active-games scoreboard row.
 
 ## Objective
 Build a lightweight second-screen MLB dashboard for a single selected team as a static web app with three modes:
@@ -164,6 +164,9 @@ Progress:
 - added a persisted debug show/hide toggle
 - added local MLB team theme palettes with contrast-safe accent derivation
 - verified theme switching and debug toggle behavior in browser automation
+- added a full-width "Other Active Games" scoreboard strip below the main dashboard panels
+- wired active-game cards to switch the dashboard to each card's home-team view
+- added a `Cycle Action Events` debug control to preview the in-game overlay treatments on demand
 
 ### Phase 10 - Documentation
 Status: pending
@@ -208,6 +211,13 @@ Move deeper into Phase 2 and start Phase 3:
 - moved debug utilities below the dashboard and added a persisted debug toggle
 - added local team-based theming because MLB Stats API does not expose team colors
 - added contrast checks so accent colors stay readable on the dark shell
+- added an out-of-town active-games scoreboard row driven by worker-normalized league scoreboard data
+- wired scoreboard card clicks to reuse the same team-selection flow as the header dropdown
+
+### 2026-04-16
+- fixed a missing `await` in the pregame worker path that was collapsing the rendered state under IIS
+- added winner highlighting for the previous-game linescore team label
+- added a `Cycle Action Events` control for stepping through overlay states like ball, strike, hit, single, double, home run, and strikeout
 
 ### 2026-04-01
 - read and summarized the root product spec

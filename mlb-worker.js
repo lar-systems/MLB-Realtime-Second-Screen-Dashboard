@@ -122,14 +122,21 @@ async function pollNow() {
 // 4. recent final
 async function fetchDashboardState() {
   if (workerState.useMockData || workerState.mockModeForced) {
-    return buildWorkerMockState(workerState.teamId, "Mock mode active.");
+    return withActiveGames(
+      buildWorkerMockState(workerState.teamId, "Mock mode active."),
+      buildMockActiveGames(workerState.teamId)
+    );
   }
 
   if (!workerState.teamId) {
     throw new Error("No team selected.");
   }
 
-  const relevantGames = await fetchRelevantSchedule(workerState.teamId);
+  const [relevantGames, leagueGames] = await Promise.all([
+    fetchRelevantSchedule(workerState.teamId),
+    fetchLeagueScoreboardGames(),
+  ]);
+  const activeGames = buildActiveGames(leagueGames);
   const liveGame = relevantGames.find(isLiveGame);
   const pregameLikeGame = relevantGames.find(isPregameCandidate);
   const upcomingGame = relevantGames.find(isUpcomingGame);
@@ -141,32 +148,32 @@ async function fetchDashboardState() {
   if (liveGame) {
     const liveFeed = await fetchLiveFeed(liveGame.gamePk, { allowNotFound: true });
     if (liveFeed) {
-      return normalizeLiveState(liveFeed);
+      return withActiveGames(normalizeLiveState(liveFeed), activeGames);
     }
     const partialLive = await fetchPartialLiveResources(liveGame.gamePk);
     if (hasPartialLiveResources(partialLive)) {
-      return normalizePartialLiveState(liveGame, partialLive);
+      return withActiveGames(normalizePartialLiveState(liveGame, partialLive), activeGames);
     }
-    return normalizeScheduleLiveFallback(liveGame);
+    return withActiveGames(normalizeScheduleLiveFallback(liveGame), activeGames);
   }
 
   if (pregameLikeGame) {
-    return normalizePregameState(pregameLikeGame, previousCompletedGame, upcomingSchedule);
+    return withActiveGames(await normalizePregameState(pregameLikeGame, previousCompletedGame, upcomingSchedule), activeGames);
   }
 
   if (upcomingGame) {
-    return normalizePregameState(upcomingGame, previousCompletedGame, upcomingSchedule);
+    return withActiveGames(await normalizePregameState(upcomingGame, previousCompletedGame, upcomingSchedule), activeGames);
   }
 
   if (recentFinal) {
     const liveFeed = await fetchLiveFeed(recentFinal.gamePk, { allowNotFound: true });
     if (liveFeed) {
-      return normalizeFinalState(liveFeed, upcomingGame);
+      return withActiveGames(normalizeFinalState(liveFeed, upcomingGame), activeGames);
     }
-    return normalizeScheduleFinalFallback(recentFinal, upcomingGame);
+    return withActiveGames(normalizeScheduleFinalFallback(recentFinal, upcomingGame), activeGames);
   }
 
-  return buildNoGameState(workerState.teamId);
+  return withActiveGames(buildNoGameState(workerState.teamId), activeGames);
 }
 
 // The schedule window is wider than "today" so the dashboard can still show a
@@ -181,6 +188,25 @@ async function fetchRelevantSchedule(teamId) {
     startDate: formatDate(startDate),
     endDate: formatDate(endDate),
     hydrate: "team,linescore,venue,probablePitcher",
+  });
+
+  const payload = await fetchJson(`${API_BASE}/schedule?${params.toString()}`);
+  const dates = Array.isArray(payload?.dates) ? payload.dates : [];
+
+  return dates
+    .flatMap((entry) => entry.games || [])
+    .sort((left, right) => new Date(left.gameDate).getTime() - new Date(right.gameDate).getTime());
+}
+
+async function fetchLeagueScoreboardGames() {
+  const today = new Date();
+  const startDate = addDays(today, -1);
+  const endDate = addDays(today, 1);
+  const params = new URLSearchParams({
+    sportId: String(SPORT_ID),
+    startDate: formatDate(startDate),
+    endDate: formatDate(endDate),
+    hydrate: "team,linescore",
   });
 
   const payload = await fetchJson(`${API_BASE}/schedule?${params.toString()}`);
@@ -1026,6 +1052,15 @@ function isLiveGame(game) {
   return abstractState === "Live" || codedState === "I";
 }
 
+function isScoreboardActiveGame(game) {
+  const detailedState = String(game?.status?.detailedState || "").toLowerCase();
+  return (
+    isLiveGame(game) ||
+    detailedState.includes("delay") ||
+    detailedState.includes("suspend")
+  );
+}
+
 function isUpcomingGame(game) {
   const abstractState = game?.status?.abstractGameState;
   const gameTime = new Date(game?.gameDate || 0).getTime();
@@ -1119,6 +1154,74 @@ function buildUpcomingSchedule(games, referenceGame = null) {
     })
     .sort((left, right) => new Date(left.gameDate).getTime() - new Date(right.gameDate).getTime())
     .slice(0, 6);
+}
+
+function withActiveGames(nextState, activeGames) {
+  return {
+    ...nextState,
+    activeGames: Array.isArray(activeGames) ? activeGames : [],
+  };
+}
+
+function buildActiveGames(games) {
+  return games
+    .filter(isScoreboardActiveGame)
+    .sort((left, right) => activeGameSortValue(left) - activeGameSortValue(right))
+    .map(normalizeActiveGameSummary);
+}
+
+function activeGameSortValue(game) {
+  const liveWeight = isLiveGame(game) ? 0 : 1;
+  const gameTime = new Date(game?.gameDate || 0).getTime();
+  return liveWeight * 1_000_000_000_000 + (Number.isFinite(gameTime) ? gameTime : 0);
+}
+
+function normalizeActiveGameSummary(game) {
+  const away = normalizeTeamIdentity(game?.teams?.away?.team);
+  const home = normalizeTeamIdentity(game?.teams?.home?.team);
+  const linescore = game?.linescore || {};
+
+  return {
+    gamePk: game?.gamePk ?? null,
+    homeTeamId: home.id,
+    away: {
+      ...away,
+      score: game?.teams?.away?.score ?? linescore?.teams?.away?.runs ?? null,
+    },
+    home: {
+      ...home,
+      score: game?.teams?.home?.score ?? linescore?.teams?.home?.runs ?? null,
+    },
+    status: buildActiveGameStatus(game),
+  };
+}
+
+function buildActiveGameStatus(game) {
+  if (!isLiveGame(game)) {
+    return game?.status?.detailedState || game?.status?.abstractGameState || "Live";
+  }
+
+  const inning = game?.linescore?.currentInning ?? game?.linescore?.scheduledInnings ?? null;
+  const inningHalf = String(game?.linescore?.inningHalf || "").toLowerCase();
+
+  if (!inning) {
+    return "Live";
+  }
+
+  if (inningHalf.includes("top")) {
+    return `Top ${inning}`;
+  }
+  if (inningHalf.includes("bottom")) {
+    return `Bot ${inning}`;
+  }
+  if (inningHalf.includes("middle")) {
+    return `Mid ${inning}`;
+  }
+  if (inningHalf.includes("end")) {
+    return `End ${inning}`;
+  }
+
+  return `In ${inning}`;
 }
 
 function getLastPlay(allPlays) {
@@ -1524,6 +1627,34 @@ function buildWorkerMockState(teamId, errorMessage) {
       lastError: errorMessage || null,
     },
   };
+}
+
+function buildMockActiveGames(teamId) {
+  const selectedTeam = teamIdentityFromId(teamId);
+
+  return [
+    {
+      gamePk: 3101,
+      homeTeamId: 112,
+      away: { ...teamIdentityFromId(138), logoUrl: teamLogoUrl(138), score: 2 },
+      home: { ...teamIdentityFromId(112), logoUrl: teamLogoUrl(112), score: 5 },
+      status: "Bot 6",
+    },
+    {
+      gamePk: 3102,
+      homeTeamId: 118,
+      away: { ...teamIdentityFromId(116), logoUrl: teamLogoUrl(116), score: 1 },
+      home: { ...teamIdentityFromId(118), logoUrl: teamLogoUrl(118), score: 1 },
+      status: "Top 8",
+    },
+    {
+      gamePk: 3103,
+      homeTeamId: 147,
+      away: { ...selectedTeam, logoUrl: teamLogoUrl(selectedTeam.id), score: 3 },
+      home: { ...teamIdentityFromId(147), logoUrl: teamLogoUrl(147), score: 4 },
+      status: "Delayed",
+    },
+  ];
 }
 
 function scheduleNextPoll(delay) {

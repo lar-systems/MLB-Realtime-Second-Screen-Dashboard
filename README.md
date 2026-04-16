@@ -110,6 +110,7 @@ The state shape evolves, but the high-level contract looks like this:
   mode: "pregame" | "live" | "final",
   team: { id, name, abbr, logoUrl },
   nextGame: { ... } | null,
+  activeGames: [ ... ],
   upcomingSchedule: [ ... ],
   previousGame: { ... } | null,
   live: { ... } | null,
@@ -142,6 +143,7 @@ Live focuses on immediate state:
 - current batter and pitcher
 - inning-by-inning linescore
 - latest play text
+- full-width out-of-town active-games strip with click-to-switch home-team dashboards
 
 ### Final
 
@@ -179,7 +181,9 @@ Mock mode exists so layout work is not blocked by MLB endpoint behavior.
 
 - The worker can emit mock `pregame`, `live`, and `final` states.
 - `Cycle Test States` rotates through those states.
+- `Cycle Action Events` steps through the in-game overlay treatments without waiting for a live feed event.
 - The mock states intentionally mirror the real normalized contract.
+- Mock live state also carries sample active-game scoreboard cards for layout testing.
 
 If you change the normalized shape, update both:
 
