@@ -116,7 +116,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-16-0054",
+    appVersion: "debug-2026-04-16-0157",
   },
 };
 
@@ -142,6 +142,9 @@ const elements = {
   statusLabel: document.querySelector("#status-label"),
   celebrationModal: document.querySelector("#celebration-modal"),
   celebrationCard: document.querySelector("#celebration-card"),
+  celebrationMedia: document.querySelector("#celebration-media"),
+  celebrationTeamLogo: document.querySelector("#celebration-team-logo"),
+  celebrationPlayerPhoto: document.querySelector("#celebration-player-photo"),
   celebrationLabel: document.querySelector("#celebration-label"),
   celebrationDetail: document.querySelector("#celebration-detail"),
   celebrationActor: document.querySelector("#celebration-actor"),
@@ -600,6 +603,23 @@ function showCelebration(celebration) {
   window.clearTimeout(state.celebration.fadeTimer);
   window.clearTimeout(state.celebration.hideTimer);
 
+  const media = resolveCelebrationMedia(celebration, state.current);
+
+  setImage(
+    elements.celebrationTeamLogo,
+    media.teamLogoUrl,
+    media.teamLogoAlt
+  );
+  setImage(
+    elements.celebrationPlayerPhoto,
+    media.playerPhoto,
+    media.playerPhotoAlt,
+    { usePlayerFallback: true }
+  );
+  if (elements.celebrationMedia) {
+    elements.celebrationMedia.hidden = !media.hasMedia;
+  }
+
   elements.celebrationLabel.textContent = celebration.label || "";
   elements.celebrationDetail.textContent = celebration.detail || "";
   elements.celebrationActor.textContent = celebration.actor || "";
@@ -633,8 +653,68 @@ function hideCelebration(immediate = false) {
   if (immediate) {
     elements.celebrationModal.hidden = true;
     elements.celebrationModal.classList.remove("is-visible", "is-exiting");
+    elements.celebrationMedia && (elements.celebrationMedia.hidden = false);
     elements.celebrationCard?.classList.remove("is-pitcher", "is-batter");
   }
+}
+
+function resolveCelebrationMedia(celebration, currentState) {
+  const liveState = currentState?.live || null;
+  const beneficiary = resolveCelebrationBeneficiary(celebration, liveState, currentState?.team || null);
+  const teamName = beneficiary.team?.name || currentState?.team?.name || "Team";
+  const actorName = celebration?.actor || beneficiary.player?.name || "Player";
+  const teamLogoUrl = celebration?.teamLogoUrl || liveLogoUrl(beneficiary.team || currentState?.team) || "";
+  const playerPhoto = celebration?.playerPhoto || beneficiary.player?.photo || "";
+
+  return {
+    hasMedia: Boolean(teamLogoUrl || playerPhoto),
+    teamLogoUrl,
+    teamLogoAlt: `${teamName} logo`,
+    playerPhoto,
+    playerPhotoAlt: actorName,
+  };
+}
+
+function resolveCelebrationBeneficiary(celebration, liveState, selectedTeam = null) {
+  const role = celebration?.beneficiaryRole || (celebration?.tone === "pitcher" ? "pitcher" : "batter");
+
+  if (role === "pitcher") {
+    return {
+      player: liveState?.pitcher || null,
+      team: resolvePitchingTeam(liveState, selectedTeam),
+    };
+  }
+
+  return {
+    player: liveState?.batter || null,
+    team: resolveBattingTeam(liveState, selectedTeam),
+  };
+}
+
+function resolveBattingTeam(liveState, fallbackTeam = null) {
+  const inningHalf = normalizeInningHalf(liveState?.inningHalf);
+
+  if (inningHalf.startsWith("top")) {
+    return liveState?.away || fallbackTeam || null;
+  }
+  if (inningHalf.startsWith("bottom")) {
+    return liveState?.home || fallbackTeam || null;
+  }
+
+  return fallbackTeam || liveState?.home || liveState?.away || null;
+}
+
+function resolvePitchingTeam(liveState, fallbackTeam = null) {
+  const inningHalf = normalizeInningHalf(liveState?.inningHalf);
+
+  if (inningHalf.startsWith("top")) {
+    return liveState?.home || fallbackTeam || null;
+  }
+  if (inningHalf.startsWith("bottom")) {
+    return liveState?.away || fallbackTeam || null;
+  }
+
+  return fallbackTeam || liveState?.away || liveState?.home || null;
 }
 
 // Pregame reuses the live shell, but swaps scores for records and uses
