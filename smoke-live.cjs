@@ -48,6 +48,18 @@ async function main() {
 
   const result = await page.evaluate(async (targetTeamId) => {
     const byId = (id) => document.getElementById(id);
+    const headshotMode = (img) => {
+      const src = img?.currentSrc || img?.getAttribute('src') || '';
+      if (!src) return null;
+      if (src.includes('headshot:silo')) return 'silo';
+      if (src.includes('/people/') && src.includes('/headshot/67/current')) return 'standard';
+      if (src.startsWith('data:image/svg+xml')) return 'fallback';
+      return 'other';
+    };
+    const backgroundColor = (img) => {
+      if (!img) return null;
+      return window.getComputedStyle(img).backgroundColor;
+    };
     const isHidden = (el) => {
       if (!el) return null;
       const style = window.getComputedStyle(el);
@@ -99,10 +111,14 @@ async function main() {
       awayRoleMeta: byId('away-live-role-meta')?.textContent?.trim() || null,
       batterMeta: byId('batter-meta')?.textContent?.trim() || null,
       pitcherMeta: byId('pitcher-meta')?.textContent?.trim() || null,
-      batterPhotoProcessed: Boolean(byId('batter-photo')?.getAttribute('src')?.startsWith('data:image/png')),
-      pitcherPhotoProcessed: Boolean(byId('pitcher-photo')?.getAttribute('src')?.startsWith('data:image/png')),
-        awayScore: byId('away-score')?.textContent?.trim() || null,
-        homeScore: byId('home-score')?.textContent?.trim() || null,
+      batterPhotoMode: headshotMode(byId('batter-photo')),
+      pitcherPhotoMode: headshotMode(byId('pitcher-photo')),
+      batterPhotoSrc: byId('batter-photo')?.currentSrc || byId('batter-photo')?.getAttribute('src') || null,
+      pitcherPhotoSrc: byId('pitcher-photo')?.currentSrc || byId('pitcher-photo')?.getAttribute('src') || null,
+      batterPhotoBackground: backgroundColor(byId('batter-photo')),
+      pitcherPhotoBackground: backgroundColor(byId('pitcher-photo')),
+      awayScore: byId('away-score')?.textContent?.trim() || null,
+      homeScore: byId('home-score')?.textContent?.trim() || null,
         centerState: byId('center-state')?.textContent?.trim() || null,
       countdownText: byId('countdown')?.textContent?.trim() || null,
       elapsedTime: byId('elapsed-time')?.textContent?.trim() || null,

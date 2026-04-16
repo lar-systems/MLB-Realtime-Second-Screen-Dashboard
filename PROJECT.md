@@ -4,7 +4,7 @@
 MLB Second-Screen Dashboard
 
 ## Current Status
-Phase 0 and Phase 1 are complete. Phase 2 is mostly in place, and Phase 3/4 have begun with a real MLB worker fetch path, normalization helpers, and automatic mock fallback when live browser fetches fail.
+Phase 0 and Phase 1 are complete. Phase 2 is mostly in place, Phase 3/4 have begun with a real MLB worker fetch path, and Phase 9 polish now includes bottom-screen utility controls plus accessible local team theming.
 
 ## Objective
 Build a lightweight second-screen MLB dashboard for a single selected team as a static web app with three modes:
@@ -149,7 +149,7 @@ Subtasks:
 - harden rendering against partial data
 
 ### Phase 9 - QA and Polish
-Status: pending
+Status: in progress
 
 Subtasks:
 - verify monitor/tablet readability
@@ -158,6 +158,12 @@ Subtasks:
 - test countdown behavior
 - test partial/missing data paths
 - verify no duplicate polling sources
+
+Progress:
+- moved debug visibility and test-state controls into a bottom utility row
+- added a persisted debug show/hide toggle
+- added local MLB team theme palettes with contrast-safe accent derivation
+- verified theme switching and debug toggle behavior in browser automation
 
 ### Phase 10 - Documentation
 Status: pending
@@ -197,6 +203,11 @@ Move deeper into Phase 2 and start Phase 3:
 - If MLB data access from the browser fails, we will note it and keep the frontend architecture intact for a later tiny proxy.
 
 ## Change Log
+
+### 2026-04-15
+- moved debug utilities below the dashboard and added a persisted debug toggle
+- added local team-based theming because MLB Stats API does not expose team colors
+- added contrast checks so accent colors stay readable on the dark shell
 
 ### 2026-04-01
 - read and summarized the root product spec

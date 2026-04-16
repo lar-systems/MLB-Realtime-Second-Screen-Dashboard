@@ -9,6 +9,7 @@
 const STORAGE_KEYS = {
   teamId: "mlb.teamId",
   lastState: "mlb.lastState",
+  debugVisible: "mlb.debugVisible",
 };
 
 const TEAM_OPTIONS = [
@@ -44,6 +45,47 @@ const TEAM_OPTIONS = [
   { id: 158, name: "Milwaukee Brewers", abbr: "MIL" },
 ];
 
+// MLB Stats API team payloads do not include brand colors, so keep a local,
+// reviewable palette keyed by team ID and derive accessible UI tokens from it.
+const DEFAULT_TEAM_THEME = {
+  primary: "#134A8E",
+  secondary: "#1D2D5C",
+  accent: "#FFB703",
+};
+
+const TEAM_THEMES = new Map([
+  [108, { primary: "#BA0021", secondary: "#003263", accent: "#C4CED4" }], // Angels
+  [109, { primary: "#A71930", secondary: "#1D1D1D", accent: "#E3D4AD" }], // Diamondbacks
+  [110, { primary: "#DF4601", secondary: "#000000", accent: "#FC4C02" }], // Orioles
+  [111, { primary: "#BD3039", secondary: "#0C2340", accent: "#C7D1D9" }], // Red Sox
+  [112, { primary: "#0E3386", secondary: "#CC3433", accent: "#A4D4FF" }], // Cubs
+  [113, { primary: "#C6011F", secondary: "#111111", accent: "#E5E8EB" }], // Reds
+  [114, { primary: "#E31937", secondary: "#0C2340", accent: "#9EA3A8" }], // Guardians
+  [115, { primary: "#33006F", secondary: "#111111", accent: "#C4CED4" }], // Rockies
+  [116, { primary: "#0C2340", secondary: "#FA4616", accent: "#FA4616" }], // Tigers
+  [117, { primary: "#002D62", secondary: "#EB6E1F", accent: "#EB6E1F" }], // Astros
+  [118, { primary: "#004687", secondary: "#BD9B60", accent: "#D9BD7A" }], // Royals
+  [119, { primary: "#005A9C", secondary: "#EF3E42", accent: "#93C5FD" }], // Dodgers
+  [120, { primary: "#AB0003", secondary: "#14225A", accent: "#E6E8EB" }], // Nationals
+  [121, { primary: "#002D72", secondary: "#FF5910", accent: "#FF8A50" }], // Mets
+  [133, { primary: "#003831", secondary: "#EFB21E", accent: "#F4C95D" }], // Athletics
+  [134, { primary: "#111111", secondary: "#FDB827", accent: "#FDB827" }], // Pirates
+  [135, { primary: "#2F241D", secondary: "#FFC425", accent: "#FFC425" }], // Padres
+  [136, { primary: "#0C2C56", secondary: "#005C5C", accent: "#9EA3A8" }], // Mariners
+  [137, { primary: "#FD5A1E", secondary: "#27251F", accent: "#FD5A1E" }], // Giants
+  [138, { primary: "#C41E3A", secondary: "#0C2340", accent: "#FEDB00" }], // Cardinals
+  [139, { primary: "#092C5C", secondary: "#8FBCE6", accent: "#F5D130" }], // Rays
+  [140, { primary: "#003278", secondary: "#C0111F", accent: "#93C5FD" }], // Rangers
+  [141, { primary: "#134A8E", secondary: "#1D2D5C", accent: "#E8291C" }], // Blue Jays
+  [142, { primary: "#002B5C", secondary: "#D31145", accent: "#8FBCE6" }], // Twins
+  [143, { primary: "#E81828", secondary: "#002D72", accent: "#6F9DD9" }], // Phillies
+  [144, { primary: "#CE1141", secondary: "#13274F", accent: "#D0D6DF" }], // Braves
+  [145, { primary: "#111111", secondary: "#C4CED4", accent: "#C4CED4" }], // White Sox
+  [146, { primary: "#00A3E0", secondary: "#EF3340", accent: "#00D4FF" }], // Marlins
+  [147, { primary: "#0C2340", secondary: "#C4CED4", accent: "#D9E1EA" }], // Yankees
+  [158, { primary: "#12284B", secondary: "#FFC52F", accent: "#FFC52F" }], // Brewers
+]);
+
 const state = {
   worker: null,
   countdownTimer: null,
@@ -53,15 +95,17 @@ const state = {
     fadeTimer: null,
     hideTimer: null,
   },
-    debug: {
-      workerStatus: "not started",
-      lastWorkerError: null,
-      appVersion: "debug-2026-04-05-2145",
-    },
-  };
+  debug: {
+    workerStatus: "not started",
+    lastWorkerError: null,
+    isVisible: false,
+    appVersion: "debug-2026-04-15-2235",
+  },
+};
 
-// Portrait cleanup uses canvas work, so cache processed headshots instead of
-// recalculating transparency on every rerender.
+// Cache the resolved MLB headshot choice per source URL so we do not re-test
+// the CDN's silo/cutout variant or re-sample matte background colors on every
+// rerender.
 const portraitImageCache = new Map();
 
 // Keep all DOM lookups in one place so markup changes are easy to review.
@@ -72,6 +116,8 @@ const elements = {
   teamTitle: document.querySelector("#team-title"),
   teamSelect: document.querySelector("#team-select"),
   cycleModeButton: document.querySelector("#cycle-mode-button"),
+  debugToggleButton: document.querySelector("#debug-toggle-button"),
+  debugPanel: document.querySelector("#debug-panel"),
   statusBanner: document.querySelector("#status-banner"),
   modeLabel: document.querySelector("#mode-label"),
   updatedClock: document.querySelector("#updated-clock"),
@@ -146,7 +192,9 @@ const elements = {
 
 function init() {
   populateTeamSelect();
+  applyTeamTheme(Number(elements.teamSelect.value));
   bindEvents();
+  restoreDebugVisibility();
   renderStartupState();
   startWorker();
 }
@@ -164,6 +212,7 @@ function bindEvents() {
   elements.teamSelect.addEventListener("change", () => {
     const teamId = Number(elements.teamSelect.value);
     localStorage.setItem(STORAGE_KEYS.teamId, String(teamId));
+    applyTeamTheme(teamId);
     if (state.worker) {
       state.worker.postMessage({ type: "SET_TEAM", teamId });
     }
@@ -173,6 +222,10 @@ function bindEvents() {
     if (state.worker) {
       state.worker.postMessage({ type: "CYCLE_MOCK_MODE" });
     }
+  });
+
+  elements.debugToggleButton.addEventListener("click", () => {
+    setDebugVisibility(!state.debug.isVisible);
   });
 }
 
@@ -184,6 +237,30 @@ function renderStartupState() {
     return;
   }
   setBanner("Loading dashboard data...", false);
+}
+
+function restoreDebugVisibility() {
+  const raw = localStorage.getItem(STORAGE_KEYS.debugVisible);
+  const isVisible = raw === null ? false : raw === "true";
+  setDebugVisibility(isVisible, { persist: false });
+}
+
+function setDebugVisibility(isVisible, options = {}) {
+  const { persist = true } = options;
+  state.debug.isVisible = Boolean(isVisible);
+
+  if (elements.debugPanel) {
+    elements.debugPanel.hidden = !state.debug.isVisible;
+  }
+
+  if (elements.debugToggleButton) {
+    elements.debugToggleButton.textContent = state.debug.isVisible ? "Hide Debug" : "Show Debug";
+    elements.debugToggleButton.setAttribute("aria-expanded", String(state.debug.isVisible));
+  }
+
+  if (persist) {
+    localStorage.setItem(STORAGE_KEYS.debugVisible, String(state.debug.isVisible));
+  }
 }
 
 function startWorker() {
@@ -252,6 +329,7 @@ function handleWorkerMessageError() {
 // Apply the shared shell first, then hand off to the mode-specific renderer.
 function renderState(nextState) {
   state.current = nextState;
+  applyTeamTheme(nextState.team?.id || Number(elements.teamSelect.value));
   elements.teamTitle.textContent = `${nextState.team?.name || "MLB"} Dashboard`;
   elements.modeLabel.textContent = capitalize(nextState.mode || "pregame");
   setImage(elements.headerTeamLogo, nextState.team?.logoUrl, `${nextState.team?.name || "Team"} logo`);
@@ -269,6 +347,145 @@ function renderState(nextState) {
 
   syncCelebration(nextState);
   restartCountdown(nextState);
+}
+
+function applyTeamTheme(teamId) {
+  const theme = resolveTeamTheme(teamId);
+  const root = document.documentElement;
+
+  root.style.setProperty("--bg-start", theme.bgStart);
+  root.style.setProperty("--bg", theme.bgMid);
+  root.style.setProperty("--bg-end", theme.bgEnd);
+  root.style.setProperty("--panel", theme.panel);
+  root.style.setProperty("--panel-strong", theme.panelStrong);
+  root.style.setProperty("--line", theme.line);
+  root.style.setProperty("--accent", theme.accent);
+  root.style.setProperty("--theme-primary-rgb", theme.primaryRgb);
+  root.style.setProperty("--theme-secondary-rgb", theme.secondaryRgb);
+  root.style.setProperty("--accent-rgb", theme.accentRgb);
+  root.style.setProperty("--accent-contrast-rgb", theme.accentContrastRgb);
+}
+
+function resolveTeamTheme(teamId) {
+  const source = TEAM_THEMES.get(Number(teamId)) || DEFAULT_TEAM_THEME;
+  const primary = normalizeHexColor(source.primary);
+  const secondary = normalizeHexColor(source.secondary);
+  const shellBase = "#07111F";
+  const darkAnchor = pickDarkerColor(primary, secondary);
+  const brightAnchor = pickLighterColor(normalizeHexColor(source.accent), pickLighterColor(primary, secondary));
+  const accent = ensureContrastColor(normalizeHexColor(source.accent), mixHexColors(shellBase, darkAnchor, 0.12), 4.5);
+  const accentContrast = mixHexColors(accent, "#FFFFFF", 0.58);
+  const panelBase = mixHexColors("#0A172A", darkAnchor, 0.08);
+  const panelStrongBase = mixHexColors("#07111F", darkAnchor, 0.04);
+  const lineBase = mixHexColors(brightAnchor, "#D9E6F3", 0.18);
+
+  return {
+    bgStart: mixHexColors("#02060B", darkAnchor, 0.12),
+    bgMid: mixHexColors("#07111F", primary, 0.08),
+    bgEnd: mixHexColors("#0B1B31", darkAnchor, 0.16),
+    panel: `rgba(${rgbStringFromHex(panelBase)}, 0.86)`,
+    panelStrong: `rgba(${rgbStringFromHex(panelStrongBase)}, 0.96)`,
+    line: `rgba(${rgbStringFromHex(lineBase)}, 0.28)`,
+    accent,
+    primaryRgb: rgbStringFromHex(primary),
+    secondaryRgb: rgbStringFromHex(secondary),
+    accentRgb: rgbStringFromHex(accent),
+    accentContrastRgb: rgbStringFromHex(accentContrast),
+  };
+}
+
+function ensureContrastColor(foregroundHex, backgroundHex, minimumContrast = 4.5) {
+  const foreground = normalizeHexColor(foregroundHex);
+  const background = normalizeHexColor(backgroundHex);
+
+  if (contrastRatio(foreground, background) >= minimumContrast) {
+    return foreground;
+  }
+
+  for (let step = 1; step <= 12; step += 1) {
+    const candidate = mixHexColors(foreground, "#F3F7FB", step / 12);
+    if (contrastRatio(candidate, background) >= minimumContrast) {
+      return candidate;
+    }
+  }
+
+  return "#F3F7FB";
+}
+
+function contrastRatio(leftHex, rightHex) {
+  const left = relativeLuminance(hexToRgb(leftHex));
+  const right = relativeLuminance(hexToRgb(rightHex));
+  const lighter = Math.max(left, right);
+  const darker = Math.min(left, right);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function relativeLuminance({ red, green, blue }) {
+  const normalize = (value) => {
+    const channel = value / 255;
+    return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+  };
+
+  const r = normalize(red);
+  const g = normalize(green);
+  const b = normalize(blue);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function pickDarkerColor(leftHex, rightHex) {
+  return relativeLuminance(hexToRgb(leftHex)) <= relativeLuminance(hexToRgb(rightHex))
+    ? leftHex
+    : rightHex;
+}
+
+function pickLighterColor(leftHex, rightHex) {
+  return relativeLuminance(hexToRgb(leftHex)) >= relativeLuminance(hexToRgb(rightHex))
+    ? leftHex
+    : rightHex;
+}
+
+function mixHexColors(leftHex, rightHex, amount = 0.5) {
+  const left = hexToRgb(leftHex);
+  const right = hexToRgb(rightHex);
+  const ratio = Math.max(0, Math.min(1, amount));
+
+  return rgbToHex({
+    red: Math.round(left.red + (right.red - left.red) * ratio),
+    green: Math.round(left.green + (right.green - left.green) * ratio),
+    blue: Math.round(left.blue + (right.blue - left.blue) * ratio),
+  });
+}
+
+function normalizeHexColor(value) {
+  const raw = String(value || "").trim().replace(/^#/, "");
+  if (raw.length === 3) {
+    return `#${raw.split("").map((channel) => channel + channel).join("").toUpperCase()}`;
+  }
+
+  if (raw.length !== 6) {
+    return DEFAULT_TEAM_THEME.primary;
+  }
+
+  return `#${raw.toUpperCase()}`;
+}
+
+function hexToRgb(value) {
+  const hex = normalizeHexColor(value).slice(1);
+  return {
+    red: Number.parseInt(hex.slice(0, 2), 16),
+    green: Number.parseInt(hex.slice(2, 4), 16),
+    blue: Number.parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex({ red, green, blue }) {
+  const encode = (channel) => Math.max(0, Math.min(255, channel)).toString(16).padStart(2, "0");
+  return `#${encode(red)}${encode(green)}${encode(blue)}`.toUpperCase();
+}
+
+function rgbStringFromHex(value) {
+  const { red, green, blue } = hexToRgb(value);
+  return `${red}, ${green}, ${blue}`;
 }
 
 function syncCelebration(nextState) {
@@ -730,6 +947,7 @@ function setImage(element, src, alt, options = {}) {
   element.hidden = true;
   element.removeAttribute("src");
   element.classList.remove("has-image", "is-fallback");
+  clearPortraitMatte(element);
   element.onerror = null;
   element.onload = null;
   element.dataset.sourceSrc = src || "";
@@ -763,56 +981,41 @@ function setImage(element, src, alt, options = {}) {
   element.classList.add("has-image");
 }
 
-// MLB headshots often ship with a flat gray backdrop. We remove that backdrop
-// once, cache the transparent result, and then reuse the cached image.
-function loadProcessedPortrait(element, src, alt, options, requestKey) {
+// Player headshots now use a safer runtime strategy:
+// try MLB's transparency-oriented silo URL, verify that the asset really has
+// alpha, then fall back to the standard headshot if anything is unclear.
+async function loadProcessedPortrait(element, src, alt, options, requestKey) {
   const cached = portraitImageCache.get(src);
   if (cached) {
     applyResolvedImage(element, cached, alt, options, requestKey);
     return;
   }
 
-  const loader = new Image();
-  loader.crossOrigin = "anonymous";
-  loader.decoding = "async";
+  let resolved = { url: src, mode: "opaque", matteColor: null };
 
-  loader.onerror = () => {
-    if (element.dataset.requestKey !== requestKey) {
-      return;
-    }
-    if (options.usePlayerFallback) {
-      applyPlayerFallback(element, alt);
-      return;
-    }
-    element.hidden = true;
-    element.removeAttribute("src");
-  };
+  try {
+    resolved = await resolveBestHeadshot(src);
+  } catch {
+    resolved = { url: src, mode: "opaque", matteColor: null };
+  }
 
-  loader.onload = () => {
-    let resolvedSrc = src;
-
-    try {
-      const processedSrc = createTransparentPortraitDataUrl(loader);
-      if (processedSrc) {
-        resolvedSrc = processedSrc;
-      }
-    } catch {
-      resolvedSrc = src;
-    }
-
-    portraitImageCache.set(src, resolvedSrc);
-    applyResolvedImage(element, resolvedSrc, alt, options, requestKey);
-  };
-
-  loader.src = src;
+  portraitImageCache.set(src, resolved);
+  applyResolvedImage(element, resolved, alt, options, requestKey);
 }
 
-function applyResolvedImage(element, resolvedSrc, alt, options, requestKey) {
+function applyResolvedImage(element, resolvedImage, alt, options, requestKey) {
   if (element.dataset.requestKey !== requestKey) {
     return;
   }
 
+  const resolvedSrc = resolvedImage?.url || "";
   element.alt = alt || "";
+  applyPortraitMatte(element, resolvedImage?.matteColor || null);
+  if (resolvedImage?.mode) {
+    element.dataset.headshotMode = resolvedImage.mode;
+  } else {
+    delete element.dataset.headshotMode;
+  }
   element.onerror = () => {
     if (element.dataset.requestKey !== requestKey) {
       return;
@@ -829,97 +1032,169 @@ function applyResolvedImage(element, resolvedSrc, alt, options, requestKey) {
   element.classList.add("has-image");
 }
 
-// Background removal is intentionally conservative:
-// sample the edge color, flood-fill only border-connected backdrop pixels,
-// then soften edges so hats, hair, and shoulders survive intact.
-function createTransparentPortraitDataUrl(image) {
-  const width = image.naturalWidth || image.width;
-  const height = image.naturalHeight || image.height;
-  if (!width || !height) {
-    return "";
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) {
-    return "";
-  }
-
-  context.drawImage(image, 0, 0, width, height);
-  const imageData = context.getImageData(0, 0, width, height);
-  const { data } = imageData;
-  const backgroundProfile = samplePortraitBackdropColor(data, width, height);
-
-  if (!backgroundProfile) {
-    return "";
-  }
-
-  const visited = floodFillPortraitBackdrop(data, width, height, backgroundProfile);
-  const clearedPixels = applyPortraitTransparency(data, width, height, backgroundProfile, visited);
-
-  if (clearedPixels < width * height * 0.02) {
-    return "";
-  }
-
-  context.putImageData(imageData, 0, 0);
-  return canvas.toDataURL("image/png");
+function getMlbHeadshotUrls(playerId, width = 180) {
+  const standard = `https://img.mlbstatic.com/mlb-photos/image/upload/w_${width},q_auto:best/v1/people/${playerId}/headshot/67/current`;
+  const siloPng = `https://img.mlbstatic.com/mlb-photos/image/upload/d_people:generic:headshot:silo:current.png/w_${width},q_auto:best,f_png/v1/people/${playerId}/headshot/67/current`;
+  const siloAuto = `https://img.mlbstatic.com/mlb-photos/image/upload/d_people:generic:headshot:silo:current.png/w_${width},q_auto:best,f_auto/v1/people/${playerId}/headshot/67/current`;
+  return { siloPng, siloAuto, standard };
 }
 
-function samplePortraitBackdropColor(data, width, height) {
-  const sampleSize = Math.max(4, Math.floor(Math.min(width, height) * 0.03));
-  const yAnchors = [
-    0,
-    Math.floor(height * 0.25),
-    Math.floor(height * 0.5),
-  ];
-  const windows = [];
+function extractPlayerIdFromHeadshotUrl(src) {
+  const match = String(src || "").match(/people\/(\d+)\/headshot\/67\/current/i);
+  return match ? Number(match[1]) : null;
+}
 
-  for (const y of yAnchors) {
-    windows.push(...sampleBackdropWindow(data, width, height, 0, y, sampleSize));
-    windows.push(...sampleBackdropWindow(data, width, height, width - sampleSize, y, sampleSize));
+async function resolveBestHeadshot(src, width = 180) {
+  const playerId = extractPlayerIdFromHeadshotUrl(src);
+  if (!playerId) {
+    return { url: src, mode: "opaque", matteColor: null };
   }
 
-  const validSamples = windows.filter((sample) => sample && sample.alpha > 0);
-  if (!validSamples.length) {
+  const { siloPng, siloAuto, standard } = getMlbHeadshotUrls(playerId, width);
+  const candidates = [siloPng, siloAuto];
+
+  for (const candidate of candidates) {
+    const candidateResult = await inspectHeadshotAsset(candidate);
+    if (candidateResult.ok && candidateResult.hasAlpha) {
+      return { url: candidate, mode: "transparent", matteColor: null };
+    }
+  }
+
+  const standardResult = await inspectHeadshotAsset(standard);
+  if (standardResult.ok) {
+    return {
+      url: standard,
+      mode: "opaque",
+      matteColor: standardResult.matteColor || null,
+    };
+  }
+
+  return { url: standard, mode: "opaque", matteColor: null };
+}
+
+async function inspectHeadshotAsset(url) {
+  try {
+    const response = await fetch(url, { mode: "cors", cache: "force-cache" });
+    if (!response.ok) {
+      return { ok: false, hasAlpha: false, matteColor: null, reason: `http_${response.status}` };
+    }
+
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("jpeg") || contentType.includes("jpg")) {
+      const blob = await response.blob();
+      const matteColor = await extractPortraitMatteColor(blob);
+      return { ok: true, hasAlpha: false, matteColor, reason: "jpeg", contentType };
+    }
+
+    const blob = await response.blob();
+    const hasAlpha = await verifyTransparentEdges(blob);
+    const matteColor = hasAlpha ? null : await extractPortraitMatteColor(blob);
+
+    return {
+      ok: true,
+      hasAlpha,
+      matteColor,
+      reason: hasAlpha ? "alpha_detected" : "no_alpha_detected",
+      contentType,
+    };
+  } catch {
+    return { ok: false, hasAlpha: false, matteColor: null, reason: "exception" };
+  }
+}
+
+async function verifyTransparentEdges(blob) {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      return false;
+    }
+
+    context.drawImage(bitmap, 0, 0);
+    return hasTransparentEdgeBand(context, canvas.width, canvas.height);
+  } catch {
+    return false;
+  }
+}
+
+function hasTransparentEdgeBand(context, width, height) {
+  const step = Math.max(1, Math.floor(Math.min(width, height) / 30));
+  const samples = [];
+
+  for (let x = 0; x < width; x += step) {
+    samples.push(context.getImageData(x, 0, 1, 1).data[3]);
+    samples.push(context.getImageData(x, height - 1, 1, 1).data[3]);
+  }
+
+  for (let y = 0; y < height; y += step) {
+    samples.push(context.getImageData(0, y, 1, 1).data[3]);
+    samples.push(context.getImageData(width - 1, y, 1, 1).data[3]);
+  }
+
+  return samples.some((alpha) => alpha < 250);
+}
+
+async function extractPortraitMatteColor(blob) {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      return null;
+    }
+
+    context.drawImage(bitmap, 0, 0);
+    const sampleSize = Math.max(3, Math.floor(Math.min(canvas.width, canvas.height) * 0.03));
+    const anchors = [
+      0,
+      Math.floor(canvas.height * 0.25),
+      Math.floor(canvas.height * 0.5),
+    ];
+    const samples = [];
+
+    for (const y of anchors) {
+      samples.push(...sampleMatteWindow(context, canvas.width, canvas.height, 0, y, sampleSize));
+      samples.push(...sampleMatteWindow(context, canvas.width, canvas.height, canvas.width - sampleSize, y, sampleSize));
+    }
+
+    const validSamples = samples.filter((sample) => sample.alpha > 0);
+    if (!validSamples.length) {
+      return null;
+    }
+
+    const median = {
+      red: medianSampleChannel(validSamples.map((sample) => sample.red)),
+      green: medianSampleChannel(validSamples.map((sample) => sample.green)),
+      blue: medianSampleChannel(validSamples.map((sample) => sample.blue)),
+    };
+
+    const ranked = validSamples
+      .map((sample) => ({ sample, distance: sampleDistance(sample, median) }))
+      .sort((left, right) => left.distance - right.distance);
+
+    const inliers = ranked
+      .filter(({ distance }) => distance <= 32)
+      .map(({ sample }) => sample);
+
+    const resolvedSamples = inliers.length >= 6
+      ? inliers
+      : ranked.slice(0, Math.min(12, ranked.length)).map(({ sample }) => sample);
+
+    const average = averageSampleColor(resolvedSamples);
+    return `rgb(${Math.round(average.red)} ${Math.round(average.green)} ${Math.round(average.blue)})`;
+  } catch {
     return null;
   }
-
-  const median = {
-    red: medianChannel(validSamples.map((sample) => sample.red)),
-    green: medianChannel(validSamples.map((sample) => sample.green)),
-    blue: medianChannel(validSamples.map((sample) => sample.blue)),
-  };
-
-  const ranked = validSamples
-    .map((sample) => ({ sample, distance: colorDistanceFromSample(sample, median) }))
-    .sort((left, right) => left.distance - right.distance);
-
-  const inliers = ranked
-    .filter(({ distance }) => distance <= 34)
-    .map(({ sample }) => sample);
-
-  const resolvedSamples = inliers.length >= 6
-    ? inliers
-    : ranked.slice(0, Math.min(12, ranked.length)).map(({ sample }) => sample);
-
-  const average = averageBackdropSample(resolvedSamples);
-  const spread = resolvedSamples.length
-    ? Math.max(...resolvedSamples.map((sample) => colorDistanceFromSample(sample, average)))
-    : 0;
-
-  return {
-    red: average.red,
-    green: average.green,
-    blue: average.blue,
-    hardThreshold: Math.max(26, Math.min(42, spread + 10)),
-    softThreshold: Math.max(48, Math.min(68, spread + 28)),
-  };
 }
 
-function sampleBackdropWindow(data, width, height, startX, startY, sampleSize) {
+function sampleMatteWindow(context, width, height, startX, startY, sampleSize) {
   const samples = [];
   const clampedStartX = Math.max(0, Math.min(width - 1, startX));
   const clampedStartY = Math.max(0, Math.min(height - 1, startY));
@@ -928,14 +1203,20 @@ function sampleBackdropWindow(data, width, height, startX, startY, sampleSize) {
 
   for (let y = clampedStartY; y < endY; y += 1) {
     for (let x = clampedStartX; x < endX; x += 1) {
-      samples.push(readPixel(data, width, x, y));
+      const data = context.getImageData(x, y, 1, 1).data;
+      samples.push({
+        red: data[0],
+        green: data[1],
+        blue: data[2],
+        alpha: data[3],
+      });
     }
   }
 
   return samples;
 }
 
-function medianChannel(values) {
+function medianSampleChannel(values) {
   const sorted = values
     .filter((value) => Number.isFinite(value))
     .sort((left, right) => left - right);
@@ -947,7 +1228,14 @@ function medianChannel(values) {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-function averageBackdropSample(samples) {
+function sampleDistance(sample, reference) {
+  const redDelta = sample.red - reference.red;
+  const greenDelta = sample.green - reference.green;
+  const blueDelta = sample.blue - reference.blue;
+  return Math.sqrt(redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta);
+}
+
+function averageSampleColor(samples) {
   if (!samples.length) {
     return { red: 0, green: 0, blue: 0 };
   }
@@ -966,171 +1254,26 @@ function averageBackdropSample(samples) {
   };
 }
 
-function colorDistanceFromSample(sample, reference) {
-  const redDelta = sample.red - reference.red;
-  const greenDelta = sample.green - reference.green;
-  const blueDelta = sample.blue - reference.blue;
-  return Math.sqrt(redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta);
+function applyPortraitMatte(element, matteColor) {
+  if (!element) {
+    return;
+  }
+
+  if (!matteColor) {
+    clearPortraitMatte(element);
+    return;
+  }
+
+  element.style.setProperty("--portrait-matte", matteColor);
 }
 
-function floodFillPortraitBackdrop(data, width, height, backgroundProfile) {
-  const hardThreshold = backgroundProfile.hardThreshold;
-  const visited = new Uint8Array(width * height);
-  const queue = [];
-  const seedMaxY = Math.max(8, Math.floor(height * 0.82));
-
-  const tryVisit = (x, y) => {
-    if (x < 0 || y < 0 || x >= width || y >= height) {
-      return;
-    }
-
-    const index = y * width + x;
-    if (visited[index]) {
-      return;
-    }
-
-    if (!matchesBackdropColor(data, index, backgroundProfile, hardThreshold)) {
-      return;
-    }
-
-    visited[index] = 1;
-    queue.push(index);
-  };
-
-  // Do not seed from the bottom edge. MLB headshots often have neck/jersey
-  // pixels touching the lower border, and starting there can eat into faces.
-  for (let x = 0; x < width; x += 1) {
-    tryVisit(x, 0);
+function clearPortraitMatte(element) {
+  if (!element) {
+    return;
   }
 
-  for (let y = 0; y < seedMaxY; y += 1) {
-    tryVisit(0, y);
-    tryVisit(width - 1, y);
-  }
-
-  for (let pointer = 0; pointer < queue.length; pointer += 1) {
-    const index = queue[pointer];
-    const x = index % width;
-    const y = Math.floor(index / width);
-
-    tryVisit(x + 1, y);
-    tryVisit(x - 1, y);
-    tryVisit(x, y + 1);
-    tryVisit(x, y - 1);
-  }
-
-  return visited;
-}
-
-function applyPortraitTransparency(data, width, height, backgroundProfile, visited) {
-  const hardThreshold = backgroundProfile.hardThreshold;
-  const softThreshold = backgroundProfile.softThreshold;
-  let clearedPixels = 0;
-
-  for (let index = 0; index < visited.length; index += 1) {
-    if (!visited[index]) {
-      continue;
-    }
-
-    data[index * 4 + 3] = 0;
-    clearedPixels += 1;
-  }
-
-  for (let y = 1; y < height - 1; y += 1) {
-    for (let x = 1; x < width - 1; x += 1) {
-      const index = y * width + x;
-      if (visited[index]) {
-        continue;
-      }
-
-      const offset = index * 4;
-      if (data[offset + 3] === 0 || !hasTransparentBackdropNeighbor(visited, width, height, x, y)) {
-        continue;
-      }
-
-      const distance = colorDistance(data, index, backgroundProfile);
-      if (distance > softThreshold) {
-        continue;
-      }
-
-      const normalized = Math.max(0, Math.min(1, (distance - hardThreshold) / (softThreshold - hardThreshold)));
-      data[offset + 3] = Math.min(data[offset + 3], Math.round(normalized * 255));
-    }
-  }
-
-  return clearedPixels;
-}
-
-function hasTransparentBackdropNeighbor(visited, width, height, x, y) {
-  const index = y * width + x;
-  return (
-    visited[index - 1] ||
-    visited[index + 1] ||
-    visited[index - width] ||
-    visited[index + width]
-  );
-}
-
-function matchesBackdropColor(data, index, backgroundColor, threshold) {
-  return colorDistance(data, index, backgroundColor) <= threshold;
-}
-
-function colorDistance(data, index, backgroundColor) {
-  const offset = index * 4;
-  const redDelta = data[offset] - backgroundColor.red;
-  const greenDelta = data[offset + 1] - backgroundColor.green;
-  const blueDelta = data[offset + 2] - backgroundColor.blue;
-  return Math.sqrt(redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta);
-}
-
-function readPixel(data, width, x, y) {
-  const offset = (y * width + x) * 4;
-  return {
-    red: data[offset],
-    green: data[offset + 1],
-    blue: data[offset + 2],
-    alpha: data[offset + 3],
-  };
-}
-
-function dominantBackdropSample(samples) {
-  const validSamples = samples.filter((sample) => sample && sample.alpha > 0);
-  if (!validSamples.length) {
-    return null;
-  }
-
-  const buckets = new Map();
-  for (const sample of validSamples) {
-    const key = [
-      Math.round(sample.red / 8),
-      Math.round(sample.green / 8),
-      Math.round(sample.blue / 8),
-    ].join(":");
-
-    const existing = buckets.get(key) || { count: 0, red: 0, green: 0, blue: 0 };
-    existing.count += 1;
-    existing.red += sample.red;
-    existing.green += sample.green;
-    existing.blue += sample.blue;
-    buckets.set(key, existing);
-  }
-
-  let dominant = null;
-  for (const bucket of buckets.values()) {
-    if (!dominant || bucket.count > dominant.count) {
-      dominant = bucket;
-    }
-  }
-
-  if (!dominant || !dominant.count) {
-    return null;
-  }
-
-  return {
-    red: dominant.red / dominant.count,
-    green: dominant.green / dominant.count,
-    blue: dominant.blue / dominant.count,
-  };
+  element.style.removeProperty("--portrait-matte");
+  delete element.dataset.headshotMode;
 }
 
 function applyPlayerFallback(element, alt) {
@@ -1138,6 +1281,7 @@ function applyPlayerFallback(element, alt) {
   element.src = inlineFallbackSilhouette();
   element.alt = alt ? `${alt} fallback silhouette` : "Player fallback silhouette";
   element.hidden = false;
+  clearPortraitMatte(element);
   element.classList.add("has-image", "is-fallback");
 }
 

@@ -1,12 +1,18 @@
 /* Theme tokens and global defaults */
 :root {
+  --bg-start: #02060b;
   --bg: #07111f;
+  --bg-end: #0b1b31;
   --panel: rgba(10, 23, 42, 0.86);
   --panel-strong: rgba(10, 23, 42, 0.96);
   --line: rgba(144, 180, 221, 0.2);
   --text: #f3f7fb;
   --muted: #9db3c9;
   --accent: #ffb703;
+  --theme-primary-rgb: 0, 138, 230;
+  --theme-secondary-rgb: 11, 27, 49;
+  --accent-rgb: 255, 183, 3;
+  --accent-contrast-rgb: 255, 226, 138;
   --danger: #ef476f;
   --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
   --text-shadow-soft: 0 2px 10px rgba(2, 6, 11, 0.4);
@@ -31,9 +37,9 @@ body {
   color: var(--text);
   font-family: "IBM Plex Sans", sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(0, 138, 230, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(255, 183, 3, 0.12), transparent 28%),
-    linear-gradient(145deg, #02060b 0%, #07111f 48%, #0b1b31 100%);
+    radial-gradient(circle at top left, rgba(var(--theme-primary-rgb), 0.22), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(var(--accent-rgb), 0.13), transparent 28%),
+    linear-gradient(145deg, var(--bg-start) 0%, var(--bg) 48%, var(--bg-end) 100%);
 }
 
 /* Shared shell layout */
@@ -51,6 +57,7 @@ select {
 .topbar,
 .controls,
 .dashboard-grid,
+.dashboard-actions,
 .matchup-grid,
 .details-grid,
 .score-strip,
@@ -139,7 +146,7 @@ select {
 }
 
 .header-select,
-#cycle-mode-button {
+.dashboard-action-button {
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 8px 12px;
@@ -148,13 +155,27 @@ select {
   height: 42px;
 }
 
-#cycle-mode-button {
+.header-select:focus-visible,
+.dashboard-action-button:focus-visible {
+  outline: 2px solid rgba(var(--accent-contrast-rgb), 0.96);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18);
+}
+
+.dashboard-action-button {
   cursor: pointer;
   white-space: nowrap;
 }
 
 .header-select {
   min-width: 280px;
+}
+
+.dashboard-actions {
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
 }
 
 .status-banner {
@@ -270,7 +291,7 @@ select {
 }
 
 .celebration-card.is-batter {
-  border-color: rgba(255, 183, 3, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .celebration-label,
@@ -309,7 +330,7 @@ select {
   margin: 24px 0;
   padding: 18px 22px;
   border-radius: 4px;
-  background: rgba(10, 23, 42, 0.96);
+  background: var(--panel-strong);
   border: 1px solid var(--line);
 }
 
@@ -508,13 +529,13 @@ select {
   object-position: center bottom;
   align-self: stretch;
   background:
-    linear-gradient(135deg, rgba(255, 183, 3, 0.28), rgba(93, 211, 158, 0.12)),
+    linear-gradient(135deg, rgba(var(--accent-rgb), 0.28), rgba(var(--theme-secondary-rgb), 0.16)),
     rgba(255, 255, 255, 0.04);
 }
 
 .live-side-photo.has-image:not(.is-fallback),
 .player-photo.has-image:not(.is-fallback) {
-  background: transparent;
+  background: var(--portrait-matte, transparent);
 }
 
 .live-side-photo.is-fallback {
@@ -631,9 +652,9 @@ select {
 }
 
 .base-dot.is-active {
-  background: rgba(255, 183, 3, 0.92);
-  border-color: rgba(255, 226, 138, 0.98);
-  box-shadow: 0 0 10px rgba(255, 183, 3, 0.35);
+  background: rgba(var(--accent-rgb), 0.92);
+  border-color: rgba(var(--accent-contrast-rgb), 0.98);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.35);
 }
 
 .base-diamond {
@@ -669,12 +690,12 @@ select {
 .base.home {
   top: 46px;
   left: 24px;
-  background: rgba(255, 183, 3, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
 }
 
 .base.is-active {
-  background: rgba(255, 183, 3, 0.78);
-  border-color: rgba(255, 226, 138, 0.95);
+  background: rgba(var(--accent-rgb), 0.78);
+  border-color: rgba(var(--accent-contrast-rgb), 0.95);
 }
 
 /* Count chips and mode-specific center detail text */
@@ -876,7 +897,7 @@ select {
   flex-shrink: 0;
   align-self: stretch;
   background:
-    linear-gradient(135deg, rgba(255, 183, 3, 0.28), rgba(93, 211, 158, 0.12)),
+    linear-gradient(135deg, rgba(var(--accent-rgb), 0.28), rgba(var(--theme-secondary-rgb), 0.16)),
     rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line);
 }
@@ -1193,15 +1214,15 @@ select {
 
 .linescore-inning-header-cell.is-current-inning {
   color: var(--text);
-  background: rgba(255, 183, 3, 0.14);
-  border-color: rgba(255, 226, 138, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(255, 226, 138, 0.14);
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-contrast-rgb), 0.55);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-contrast-rgb), 0.14);
 }
 
 .linescore-cell.is-active {
-  background: rgba(255, 183, 3, 0.14);
-  border-color: rgba(255, 226, 138, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(255, 226, 138, 0.14);
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-contrast-rgb), 0.55);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-contrast-rgb), 0.14);
 }
 
 .linescore-cell.is-unplayed {
@@ -1209,7 +1230,7 @@ select {
 }
 
 .linescore-total-cell {
-  background: rgba(255, 183, 3, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .debug-panel {
@@ -1269,6 +1290,10 @@ select {
     flex-wrap: wrap;
   }
 
+  .dashboard-actions {
+    justify-content: flex-start;
+  }
+
   .score-strip {
     flex-direction: column;
     align-items: stretch;
@@ -1280,6 +1305,10 @@ select {
 
   .header-select {
     min-width: 0;
+    width: 100%;
+  }
+
+  .dashboard-action-button {
     width: 100%;
   }
 

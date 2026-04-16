@@ -178,7 +178,7 @@ normalization paths.
 Mock mode exists so layout work is not blocked by MLB endpoint behavior.
 
 - The worker can emit mock `pregame`, `live`, and `final` states.
-- `Cycle Mock Mode` rotates through those states.
+- `Cycle Test States` rotates through those states.
 - The mock states intentionally mirror the real normalized contract.
 
 If you change the normalized shape, update both:
@@ -281,17 +281,38 @@ If a logo needs tuning, check:
 - `WATERMARK_PROFILES`
 - the watermark rules in `styles.css`
 
-### Player portraits are post-processed
+### Team themes are local and contrast-checked
 
-MLB headshots often ship with a flat gray backdrop. `app.js` runs a best-effort
-canvas cleanup pass to convert that border-connected backdrop into
-transparency, then caches the result for reuse.
+The MLB Stats API does not expose team color palettes, so `app.js` keeps a
+local `TEAM_THEMES` map keyed by team ID and derives the runtime CSS variables
+from that source.
+
+The theme system intentionally keeps body text on a stable light-on-dark shell
+and only applies team colors to accents, borders, panel tinting, and background
+glows. Accent colors are lightened when needed to keep contrast readable
+against the dashboard surface.
+
+### Player portraits use `silo -> verify -> standard fallback`
+
+MLB exposes a public headshot CDN pattern, but transparent/cutout delivery is
+not formally documented. The safe production behavior in `app.js` is:
+
+1. build the standard headshot URL and the transparency-oriented `silo` URL
+2. try `silo` first
+3. verify actual alpha on the returned image edge pixels
+4. if alpha is not clearly present, fall back to the standard headshot
+5. for opaque portraits, sample the portrait matte and use that color as the
+   portrait-column background so taller cards do not reveal the dark shell
+
+That means the UI never assumes transparency exists. Portrait cards must still
+look correct with an opaque MLB headshot.
 
 If portrait rendering breaks, inspect:
 
 - `setImage()`
 - `loadProcessedPortrait()`
-- `createTransparentPortraitDataUrl()`
+- `resolveBestHeadshot()`
+- `testTransparentCandidate()`
 
 ### Linescore is table-based on purpose
 
