@@ -156,7 +156,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-18-0017",
+    appVersion: "debug-2026-04-18-0019",
   },
 };
 
@@ -2783,7 +2783,11 @@ function renderActiveGameCard(item) {
   const awayScore = escapeHtml(String(item?.away?.score ?? "-"));
   const homeScore = escapeHtml(String(item?.home?.score ?? "-"));
   const status = escapeHtml(item?.status || "Live");
-  const actionLabel = escapeHtml(item?.actionLabel || "Home Team");
+  const actionLabel = escapeHtml(
+    item?.kind === "final"
+      ? formatScoreboardCardDateLabel(item?.startTime)
+      : (item?.actionLabel || "Home Team")
+  );
   const label = escapeHtml(`Open ${homeName} dashboard`);
   const winnerSide = item?.winnerSide === "away" || item?.winnerSide === "home" ? item.winnerSide : "";
   const cardClassName = item?.kind === "final"
@@ -2882,6 +2886,17 @@ function buildLogoBadgeMarkup(logoUrl, alt, options = {}) {
       <img class="${imageClassName}" src="${escapeHtml(logoSrc)}" alt="${safeAlt}">
     </span>
   `;
+}
+
+function formatScoreboardCardDateLabel(value) {
+  if (!value) {
+    return "FINAL";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value)).toUpperCase();
 }
 
 function buildLogoBadgeStyle(teamId) {

@@ -1794,6 +1794,7 @@ function normalizeScoreboardGameSummary(game, kind) {
   return {
     kind,
     gamePk: game?.gamePk ?? null,
+    startTime: game?.gameDate || null,
     homeTeamId: home.id,
     away: {
       ...away,
