@@ -1354,11 +1354,12 @@ select {
   display: grid;
   justify-items: center;
   gap: 3px;
+  text-transform: uppercase;
 }
 
 .pregame-detail-line {
   display: block;
-  text-transform: none;
+  text-transform: uppercase;
   letter-spacing: 0.03em;
   line-height: 1.15;
   color: var(--muted);
@@ -1711,15 +1712,38 @@ select {
 
 .schedule-item {
   display: grid;
-  justify-items: center;
+  justify-items: stretch;
   align-content: start;
   gap: 5px;
-  min-height: 144px;
+  min-height: 126px;
   padding: 10px 6px;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.035);
   text-align: center;
+}
+
+.schedule-item-home {
+  background:
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.12), rgba(var(--theme-primary-rgb), 0.05)),
+    rgba(255, 255, 255, 0.038);
+  border-color: rgba(var(--accent-rgb), 0.24);
+}
+
+.schedule-item-away {
+  background:
+    linear-gradient(180deg, rgba(6, 15, 28, 0.44), rgba(4, 11, 22, 0.28)),
+    rgba(255, 255, 255, 0.02);
+  border-color: rgba(143, 188, 230, 0.12);
+}
+
+.schedule-item-top {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  justify-self: center;
 }
 
 .schedule-item-date,
@@ -1731,6 +1755,8 @@ select {
 .schedule-item-date {
   display: grid;
   gap: 2px;
+  justify-items: center;
+  text-align: center;
 }
 
 .schedule-item-weekday {
@@ -1750,15 +1776,21 @@ select {
 
 .schedule-item-site {
   color: var(--muted);
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.05rem;
+  font-size: 1.28rem;
+  font-weight: 700;
   letter-spacing: 0.12em;
+  line-height: 1;
   text-transform: uppercase;
+  flex: 0 0 auto;
 }
 
 .schedule-item-logo-wrap {
   display: grid;
   place-items: center;
-  min-height: 52px;
+  min-height: 44px;
 }
 
 .schedule-item-logo {
@@ -1838,52 +1870,59 @@ select {
   text-align: right;
 }
 
-.player-stat-table {
+.player-stat-metrics {
   width: 100%;
-  border-collapse: separate;
-  border-spacing: 6px;
-  table-layout: fixed;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 6px;
 }
 
-.player-stat-table th,
-.player-stat-table td {
-  text-align: center;
+.player-stat-chip {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 10px 8px;
+  padding: 9px 8px 8px;
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.player-stat-table th {
+.player-stat-chip-label {
   color: var(--muted);
   font-size: 0.72rem;
   letter-spacing: 0.12em;
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.03);
+  text-transform: uppercase;
 }
 
-.player-stat-table td {
+.player-stat-chip-divider {
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.player-stat-chip-value {
   color: var(--text);
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 1rem;
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.05);
+  line-height: 1.2;
 }
 
-.player-stat-table-compact {
-  border-spacing: 4px;
+.player-stat-metrics-compact {
+  gap: 4px;
 }
 
-.player-stat-table-compact th,
-.player-stat-table-compact td {
-  padding: 6px 5px;
-  border-radius: 4px;
+.player-stat-metrics-compact .player-stat-chip {
+  gap: 4px;
+  padding: 7px 5px 6px;
 }
 
-.player-stat-table-compact th {
+.player-stat-metrics-compact .player-stat-chip-label {
   font-size: 0.58rem;
 }
 
-.player-stat-table-compact td {
+.player-stat-metrics-compact .player-stat-chip-value {
   font-size: 0.82rem;
 }
 
@@ -1894,11 +1933,43 @@ select {
 .linescore {
   display: grid;
   gap: 10px;
+  padding-top: 6px;
 }
 
 .linescore-table-wrap {
+  display: grid;
+  gap: 8px;
   overflow-x: auto;
   padding-bottom: 4px;
+}
+
+.linescore-game-meta {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+}
+
+.linescore-grid {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.linescore-totals-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .linescore-empty {
@@ -1908,55 +1979,63 @@ select {
   color: var(--muted);
 }
 
-.linescore-table {
-  width: max-content;
-  min-width: 100%;
-  border-collapse: separate;
-  border-spacing: 6px;
-  table-layout: fixed;
-}
-
-.linescore-team-spacer,
-.linescore-team-label,
-.linescore-inning-header-cell,
-.linescore-cell,
-.linescore-total-header,
-.linescore-total-cell {
-  min-width: 44px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  text-align: center;
-  vertical-align: middle;
-}
-
-.linescore-team-label,
-.linescore-cell,
-.linescore-total-cell {
-  height: 42px;
-}
-
-.linescore-team-spacer,
-.linescore-inning-header-cell,
-.linescore-total-header {
-  height: 21px;
+.linescore-team-column {
+  display: grid;
+  flex: 0 0 92px;
+  width: 92px;
+  grid-template-rows: 21px 42px 42px;
+  gap: 0;
 }
 
 .linescore-team-label {
   min-width: 92px;
   padding: 0 12px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
   color: var(--text);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-align: left;
 }
 
-.linescore-team-identity {
-  display: inline-flex;
+.linescore-team-spacer {
+  width: 92px;
+}
+
+.linescore-team-label,
+.linescore-stat-column {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.linescore-stat-column {
+  display: grid;
+  grid-template-rows: 21px 42px 42px;
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.linescore-stat-header,
+.linescore-stat-value {
+  display: flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.linescore-team-identity {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+  line-height: 1;
 }
 
 .linescore-logo-badge {
@@ -1982,52 +2061,106 @@ select {
   line-height: 1;
 }
 
-.linescore-team-label.is-winner {
+.linescore-team-label.is-away,
+.linescore-stat-value.is-away {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.linescore-team-label.is-home,
+.linescore-stat-value.is-home {
+  background: rgba(var(--theme-primary-rgb), 0.08);
+}
+
+.linescore-team-label.is-away {
+  border-radius: 4px 4px 0 0;
+}
+
+.linescore-team-label.is-home {
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+}
+
+.linescore-team-label.is-winner,
+.linescore-stat-value.is-winner {
   background: #5f470f;
-  border-color: rgba(248, 228, 169, 0.38);
   color: #f8f3e2;
+}
+
+.linescore-team-label.is-winner {
+  border-color: rgba(248, 228, 169, 0.38);
   box-shadow: inset 0 0 0 1px rgba(255, 240, 194, 0.12);
 }
 
-.linescore-team-spacer {
-  min-width: 92px;
-  background: transparent;
-  border-color: transparent;
-}
-
-.linescore-inning-header-cell,
-.linescore-total-header {
+.linescore-stat-header {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 600;
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.linescore-cell,
-.linescore-total-cell {
+.linescore-stat-value {
   color: var(--text);
   font-size: 1.08rem;
   font-weight: 700;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
 }
 
-.linescore-inning-header-cell.is-current-inning {
+.linescore-stat-value.is-total.is-away {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.linescore-stat-value.is-total.is-home {
+  background: rgba(var(--theme-primary-rgb), 0.12);
+}
+
+.linescore-stat-value.is-total.is-winner {
+  background: #735617;
+  color: #fff7df;
+  box-shadow: inset 0 1px 0 rgba(255, 241, 199, 0.12);
+}
+
+.linescore-totals-group .linescore-stat-value.is-total.is-winner {
+  background: #684c0d;
+  color: #fff7df;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 243, 205, 0.15),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+}
+
+.linescore-totals-group .linescore-stat-column.is-total {
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.linescore-totals-group .linescore-stat-header {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.linescore-stat-column.is-current-inning {
+  border-color: rgba(var(--accent-contrast-rgb), 0.55);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-contrast-rgb), 0.14);
+}
+
+.linescore-stat-column.is-current-inning .linescore-stat-header {
   color: var(--text);
   background: rgba(var(--accent-rgb), 0.14);
-  border-color: rgba(var(--accent-contrast-rgb), 0.55);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-contrast-rgb), 0.14);
 }
 
-.linescore-cell.is-active {
+.linescore-stat-column.is-total {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.linescore-stat-column.is-total .linescore-stat-value {
+  background: rgba(var(--accent-rgb), 0.04);
+}
+
+.linescore-stat-value.is-active {
   background: rgba(var(--accent-rgb), 0.14);
-  border-color: rgba(var(--accent-contrast-rgb), 0.55);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-contrast-rgb), 0.14);
 }
 
-.linescore-cell.is-unplayed {
+.linescore-stat-value.is-unplayed {
   opacity: 0.38;
-}
-
-.linescore-total-cell {
-  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .debug-panel {
@@ -2153,39 +2286,25 @@ select {
     width: 100%;
   }
 
-  .linescore-header-row,
-  .linescore-team-row {
-    grid-template-columns: 56px minmax(0, 1fr) 96px;
+  .linescore-grid {
+    gap: 4px;
   }
 
-  .linescore-table {
-    border-spacing: 4px;
-  }
-
-  .linescore-team-spacer,
-  .linescore-team-label,
-  .linescore-inning-header-cell,
-  .linescore-cell,
-  .linescore-total-header,
-  .linescore-total-cell {
-    min-width: 38px;
-  }
-
-  .linescore-team-label,
-  .linescore-cell,
-  .linescore-total-cell {
-    height: 38px;
-  }
-
-  .linescore-team-spacer,
-  .linescore-inning-header-cell,
-  .linescore-total-header {
-    height: 19px;
+  .linescore-team-column {
+    flex-basis: 78px;
+    width: 78px;
   }
 
   .linescore-team-label,
   .linescore-team-spacer {
     min-width: 78px;
+    width: 78px;
+  }
+
+  .linescore-stat-column {
+    flex-basis: 38px;
+    width: 38px;
+    min-width: 38px;
   }
 
   .details-grid {

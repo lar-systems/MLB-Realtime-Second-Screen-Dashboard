@@ -122,9 +122,10 @@ async function pollNow() {
 // 4. recent final
 async function fetchDashboardState() {
   if (workerState.useMockData || workerState.mockModeForced) {
-    return withActiveGames(
+    return withScoreboardGames(
       buildWorkerMockState(workerState.teamId, "Mock mode active."),
-      buildMockActiveGames(workerState.teamId)
+      buildMockActiveGames(workerState.teamId),
+      []
     );
   }
 
@@ -760,6 +761,7 @@ function normalizePreviousGame(game) {
 
   return {
     gamePk: game?.gamePk,
+    startTime: game?.gameDate || null,
     status: game?.status?.detailedState || game?.status?.abstractGameState || "Final",
     away: normalizeTeamIdentity(game?.teams?.away?.team),
     home: normalizeTeamIdentity(game?.teams?.home?.team),
@@ -2157,16 +2159,7 @@ function buildWorkerMockState(teamId, errorMessage) {
           },
           seasonLine: "3.40 ERA / 1.20 WHIP",
         },
-        celebration: {
-          id: "mock-live-insurance-6",
-          eventKey: "rbi",
-          impactContext: "insurance",
-          label: "INSURANCE RUN",
-          detail: "adds cushion",
-          actor: "Current Batter",
-          tone: "batter",
-          beneficiaryRole: "batter",
-        },
+        celebration: null,
         linescore: [
           { inning: 1, away: 0, home: 1 },
           { inning: 2, away: 1, home: 0 },
@@ -2239,17 +2232,7 @@ function buildWorkerMockState(teamId, errorMessage) {
       awayScore: 2,
       homeScore: 4,
       summary: `${team.name} closes it out and moves on to the next series matchup.`,
-      celebration: buildCelebrationPayload({
-        id: `final-win:mock-${team.id}:4-2`,
-        eventKey: "win_the_game",
-        label: "WIN THE GAME",
-        detail: "closes it out 4-2",
-        actor: team.name,
-        tone: "batter",
-        beneficiaryRole: "batter",
-        forceSelectedTeamBenefit: true,
-        teamLogoUrl: teamLogoUrl(team.id),
-      }),
+      celebration: null,
     },
     meta: {
       sourceStatus: errorMessage ? `Live MLB fetch failed. ${errorMessage}` : "Worker mock final state",

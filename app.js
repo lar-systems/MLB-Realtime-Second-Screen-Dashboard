@@ -156,7 +156,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-18-0003",
+    appVersion: "debug-2026-04-18-0017",
   },
 };
 
@@ -900,7 +900,7 @@ function renderPregame(nextState) {
   elements.homeName.textContent = homeName;
   setScoreValue(elements.awayScore, awayRecord || "--", "record");
   setScoreValue(elements.homeScore, homeRecord || "--", "record");
-  setCenterStateText(specialStatus ? "Game Status" : "Next Game");
+  setCenterStateText(specialStatus ? "GAME STATUS" : "NEXT GAME IN");
   elements.countState.innerHTML = specialStatus
     ? `<span class="count-status-text">${formatPregameStatusDetail(game)}</span>`
     : `<span class="count-status-text">${formatPregameCountdownDetail(game)}</span>`;
@@ -933,6 +933,7 @@ function renderPregame(nextState) {
     awayLogo: previousGame?.away?.logoUrl || "",
     homeLabel: previousGame?.home?.abbr || previousGame?.home?.name || "HME",
     homeLogo: previousGame?.home?.logoUrl || "",
+    gameDateTime: previousGame?.startTime || null,
     awayTotals: buildFixedLinescoreTotals(previousGame?.awayScore, previousGame?.awayHits, previousGame?.awayErrors),
     homeTotals: buildFixedLinescoreTotals(previousGame?.homeScore, previousGame?.homeHits, previousGame?.homeErrors),
     awayLabelClass: buildPreviousGameWinnerLabelClass(previousGame, "away"),
@@ -1003,7 +1004,9 @@ function renderLive(nextState) {
   setPitchCountBadge(elements.pitcherCard, live?.pitcher?.pitchCount);
 
   setLinescoreLabel("Linescore");
-  renderLinescore(live?.linescore || []);
+  renderLinescore(live?.linescore || [], {
+    gameDateTime: live?.startTime || null,
+  });
 }
 
 // Final mode bridges the completed game and the next scheduled matchup.
@@ -1057,7 +1060,7 @@ function renderFinal(nextState) {
   }
   setCenterStateText(
     nextGame
-      ? (specialStatus ? "Game Status" : "Next Game")
+      ? (specialStatus ? "GAME STATUS" : "NEXT GAME IN")
       : "Final"
   );
   elements.countState.innerHTML = nextGame
@@ -1179,12 +1182,12 @@ function buildStatBlockMarkup(statsConfig, variant = "card") {
     return "";
   }
 
-  const tableClass = variant === "compact"
-    ? "player-stat-table player-stat-table-compact"
-    : "player-stat-table";
   const summaryClass = variant === "compact"
     ? "player-stat-summary player-stat-summary-compact"
     : "player-stat-summary";
+  const metricsClass = variant === "compact"
+    ? "player-stat-metrics player-stat-metrics-compact"
+    : "player-stat-metrics";
 
   let markup = '<div class="player-stat-block">';
 
@@ -1199,14 +1202,15 @@ function buildStatBlockMarkup(statsConfig, variant = "card") {
 
   if (metrics.length) {
     markup += `
-      <table class="${tableClass}">
-        <thead>
-          <tr>${metrics.map((metric) => `<th scope="col">${escapeHtml(metric.label)}</th>`).join("")}</tr>
-        </thead>
-        <tbody>
-          <tr>${metrics.map((metric) => `<td>${escapeHtml(String(metric.value))}</td>`).join("")}</tr>
-        </tbody>
-      </table>
+      <div class="${metricsClass}">
+        ${metrics.map((metric) => `
+          <div class="player-stat-chip">
+            <span class="player-stat-chip-label">${escapeHtml(metric.label)}</span>
+            <span class="player-stat-chip-divider" aria-hidden="true"></span>
+            <span class="player-stat-chip-value">${escapeHtml(String(metric.value))}</span>
+          </div>
+        `).join("")}
+      </div>
     `;
   }
 
@@ -1656,11 +1660,20 @@ function inlineFallbackSilhouette() {
 
 // ----- Linescore rendering -----
 
-// The linescore is table-based so it can always show innings 1-9 while still
-// expanding naturally for extra innings.
+// The linescore uses fixed-height stacked columns so innings still read cleanly
+// through 1-9 while extra innings can extend horizontally.
 function renderLinescore(linescore, options = {}) {
+  const gameMetaMarkup = options.gameDateTime
+    ? `<div class="linescore-game-meta">${escapeHtml(formatDateTime(options.gameDateTime))}</div>`
+    : "";
+
   if (!linescore.length) {
-    elements.linescore.innerHTML = `<div class="linescore-empty">${escapeHtml(options.emptyMessage || "Waiting for inning-by-inning data.")}</div>`;
+    elements.linescore.innerHTML = `
+      <div class="linescore-table-wrap">
+        <div class="linescore-empty">${escapeHtml(options.emptyMessage || "Waiting for inning-by-inning data.")}</div>
+        ${gameMetaMarkup}
+      </div>
+    `;
     return;
   }
 
@@ -1671,55 +1684,77 @@ function renderLinescore(linescore, options = {}) {
   const displayedInnings = buildDisplayedInnings(linescore);
   const awayTotals = options.awayTotals || calculateLinescoreTotals(displayedInnings, "away");
   const homeTotals = options.homeTotals || calculateLinescoreTotals(displayedInnings, "home");
-  const awayLabelClass = options.awayLabelClass ? ` ${options.awayLabelClass}` : "";
-  const homeLabelClass = options.homeLabelClass ? ` ${options.homeLabelClass}` : "";
+  const awayIsWinner = hasLinescoreWinnerFlag(options.awayLabelClass);
+  const homeIsWinner = hasLinescoreWinnerFlag(options.homeLabelClass);
   const activeInning = Number(state.current?.live?.inning) || null;
   const inningHalf = resolveDisplayedInningHalf(
     state.current?.live?.inningHalf,
     state.current?.live?.outs
   );
 
-  const inningHeaderCells = displayedInnings.map((entry) => (
-    `<th scope="col" class="linescore-inning-header-cell${entry.inning === activeInning ? " is-current-inning" : ""}">${entry.inning}</th>`
+  const inningColumns = displayedInnings.map((entry) => (
+    buildLinescoreStatColumnMarkup(
+      entry.inning,
+      formatLinescoreCell(entry.away),
+      formatLinescoreCell(entry.home),
+      {
+        isCurrentInning: entry.inning === activeInning,
+        awayValueClass: buildLinescoreCellClass(entry.inning, "away", activeInning, inningHalf, { isWinner: awayIsWinner }),
+        homeValueClass: buildLinescoreCellClass(entry.inning, "home", activeInning, inningHalf, { isWinner: homeIsWinner }),
+      }
+    )
   )).join("");
 
-  const awayCells = displayedInnings.map((entry) => (
-    `<td class="${buildLinescoreCellClass(entry.inning, "away", activeInning, inningHalf)}">${formatLinescoreCell(entry.away)}</td>`
-  )).join("");
-
-  const homeCells = displayedInnings.map((entry) => (
-    `<td class="${buildLinescoreCellClass(entry.inning, "home", activeInning, inningHalf)}">${formatLinescoreCell(entry.home)}</td>`
-  )).join("");
+  const totalColumns = [
+    buildLinescoreStatColumnMarkup("R", awayTotals.runs, homeTotals.runs, {
+      isTotal: true,
+      awayValueClass: buildLinescoreCellClass(null, "away", activeInning, inningHalf, { isWinner: awayIsWinner, isTotal: true }),
+      homeValueClass: buildLinescoreCellClass(null, "home", activeInning, inningHalf, { isWinner: homeIsWinner, isTotal: true }),
+    }),
+    buildLinescoreStatColumnMarkup("H", awayTotals.hits, homeTotals.hits, {
+      isTotal: true,
+      awayValueClass: buildLinescoreCellClass(null, "away", activeInning, inningHalf, { isWinner: awayIsWinner, isTotal: true }),
+      homeValueClass: buildLinescoreCellClass(null, "home", activeInning, inningHalf, { isWinner: homeIsWinner, isTotal: true }),
+    }),
+    buildLinescoreStatColumnMarkup("E", awayTotals.errors, homeTotals.errors, {
+      isTotal: true,
+      awayValueClass: buildLinescoreCellClass(null, "away", activeInning, inningHalf, { isWinner: awayIsWinner, isTotal: true }),
+      homeValueClass: buildLinescoreCellClass(null, "home", activeInning, inningHalf, { isWinner: homeIsWinner, isTotal: true }),
+    }),
+  ].join("");
 
   elements.linescore.innerHTML = `
     <div class="linescore-table-wrap">
-      <table class="linescore-table">
-        <thead>
-          <tr>
-            <th scope="col" class="linescore-team-spacer"></th>
-            ${inningHeaderCells}
-            <th scope="col" class="linescore-total-header">R</th>
-            <th scope="col" class="linescore-total-header">H</th>
-            <th scope="col" class="linescore-total-header">E</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row" class="linescore-team-label${awayLabelClass}">${buildLinescoreTeamLabelMarkup(awayLabel, awayLogo)}</th>
-            ${awayCells}
-            <td class="linescore-total-cell">${awayTotals.runs}</td>
-            <td class="linescore-total-cell">${awayTotals.hits}</td>
-            <td class="linescore-total-cell">${awayTotals.errors}</td>
-          </tr>
-          <tr>
-            <th scope="row" class="linescore-team-label${homeLabelClass}">${buildLinescoreTeamLabelMarkup(homeLabel, homeLogo)}</th>
-            ${homeCells}
-            <td class="linescore-total-cell">${homeTotals.runs}</td>
-            <td class="linescore-total-cell">${homeTotals.hits}</td>
-            <td class="linescore-total-cell">${homeTotals.errors}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="linescore-grid" role="img" aria-label="Inning-by-inning linescore">
+        <div class="linescore-team-column">
+          <div class="linescore-team-spacer" aria-hidden="true"></div>
+          <div class="${buildLinescoreTeamLabelClass("away", awayIsWinner)}">${buildLinescoreTeamLabelMarkup(awayLabel, awayLogo)}</div>
+          <div class="${buildLinescoreTeamLabelClass("home", homeIsWinner)}">${buildLinescoreTeamLabelMarkup(homeLabel, homeLogo)}</div>
+        </div>
+        ${inningColumns}
+        <div class="linescore-totals-group">
+          ${totalColumns}
+        </div>
+      </div>
+      ${gameMetaMarkup}
+    </div>
+  `;
+}
+
+function buildLinescoreStatColumnMarkup(header, awayValue, homeValue, options = {}) {
+  const columnClasses = ["linescore-stat-column"];
+  if (options.isCurrentInning) {
+    columnClasses.push("is-current-inning");
+  }
+  if (options.isTotal) {
+    columnClasses.push("is-total");
+  }
+
+  return `
+    <div class="${columnClasses.join(" ")}">
+      <div class="linescore-stat-header">${escapeHtml(String(header))}</div>
+      <div class="${options.awayValueClass || "linescore-stat-value"}">${escapeHtml(String(awayValue))}</div>
+      <div class="${options.homeValueClass || "linescore-stat-value"}">${escapeHtml(String(homeValue))}</div>
     </div>
   `;
 }
@@ -1748,8 +1783,24 @@ function buildDisplayedInnings(linescore) {
 }
 
 // Highlight the active half-inning and dim future half-innings.
-function buildLinescoreCellClass(inningNumber, side, activeInning, inningHalf) {
-  const classes = ["linescore-cell"];
+function buildLinescoreTeamLabelClass(side, isWinner = false) {
+  const classes = ["linescore-team-label", `is-${side}`];
+  if (isWinner) {
+    classes.push("is-winner");
+  }
+  return classes.join(" ");
+}
+
+function buildLinescoreCellClass(inningNumber, side, activeInning, inningHalf, options = {}) {
+  const classes = ["linescore-stat-value", `is-${side}`];
+
+  if (options.isTotal) {
+    classes.push("is-total");
+  }
+
+  if (options.isWinner) {
+    classes.push("is-winner");
+  }
 
   if (isActiveLinescoreCell(inningNumber, side, activeInning, inningHalf)) {
     classes.push("is-active");
@@ -1758,6 +1809,12 @@ function buildLinescoreCellClass(inningNumber, side, activeInning, inningHalf) {
   }
 
   return classes.join(" ");
+}
+
+function hasLinescoreWinnerFlag(value) {
+  return String(value || "")
+    .split(/\s+/)
+    .some((entry) => entry === "is-winner");
 }
 
 function normalizeInningHalf(value) {
@@ -2771,17 +2828,22 @@ function renderScheduleItem(item) {
   const day = formatScheduleDayNumber(item?.startTime);
   const time = formatScheduleTime(item?.startTime, item?.statusText);
   const opponentName = item?.opponentName || "Opponent";
-  const siteLabel = item?.isHome ? "vs" : "@";
+  const siteLabel = item?.isHome ? "H" : "@";
   const logo = item?.opponentLogoUrl || "";
   const alt = `${opponentName} logo`;
+  const scheduleItemClass = item?.isHome
+    ? "schedule-item schedule-item-home"
+    : "schedule-item schedule-item-away";
 
   return `
-    <article class="schedule-item">
-      <p class="schedule-item-date">
-        <span class="schedule-item-weekday">${weekday}</span>
-        <span class="schedule-item-day">${day}</span>
-      </p>
-      <p class="schedule-item-site">${siteLabel}</p>
+    <article class="${scheduleItemClass}">
+      <div class="schedule-item-top">
+        <p class="schedule-item-date">
+          <span class="schedule-item-weekday">${weekday}</span>
+          <span class="schedule-item-day">${day}</span>
+        </p>
+        <p class="schedule-item-site">${siteLabel}</p>
+      </div>
       <div class="schedule-item-logo-wrap">
         ${buildLogoBadgeMarkup(logo, alt, { imageClass: "schedule-item-logo", placeholderClass: "schedule-item-logo-placeholder" })}
       </div>
@@ -2875,10 +2937,8 @@ function formatPregameCountdownDetail(game) {
 }
 
 function buildPregameDetailMarkup(game) {
-  const location = escapeHtml(game?.isHome ? "Home Game" : "Road Game");
   const startTime = escapeHtml(game?.startTime ? formatDateTime(game.startTime) : "Time TBD");
   return `
-    <span class="pregame-detail-line pregame-detail-location">${location}</span>
     <span class="pregame-detail-line pregame-detail-time">${startTime}</span>
   `;
 }
