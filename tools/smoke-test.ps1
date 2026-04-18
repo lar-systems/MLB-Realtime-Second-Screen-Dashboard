@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = Split-Path $PSScriptRoot -Parent
 
 function Get-BrowserPath {
   $candidates = @(
@@ -46,7 +47,7 @@ function Assert-NotContains {
 }
 
 $browser = Get-BrowserPath
-$smokeRoot = Join-Path $PSScriptRoot ".smoke"
+$smokeRoot = Join-Path $repoRoot ".smoke"
 $profileDir = Join-Path $smokeRoot "browser-profile"
 $domPath = Join-Path $smokeRoot "dumped-dom.html"
 

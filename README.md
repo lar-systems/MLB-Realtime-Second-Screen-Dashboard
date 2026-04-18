@@ -50,7 +50,7 @@ The important design rule is that the UI only reads normalized state. Raw MLB pa
 
 - A modern desktop browser
 - A local static server
-- Node.js if you want to run the smoke scripts
+- Node.js only if you want to run the optional smoke scripts
 
 ### Run The Dashboard
 
@@ -80,16 +80,39 @@ Do not run the app from `file:///`. Web Workers and some browser features will n
 These scripts are optional, but they are useful when you are changing layout or data flow.
 
 ```powershell
-npm run check
-npm run smoke:pregame
-npm run smoke:live
-npm run smoke:final
+npm --prefix tools install
+npm --prefix tools run check
+npm --prefix tools run smoke:pregame
+npm --prefix tools run smoke:live
+npm --prefix tools run smoke:final
 ```
 
 Notes:
 
-- `smoke-live.cjs` expects a local browser install and a running local site.
-- `smoke-test.ps1` is a lighter DOM-based sanity check for `http://localhost/`.
+- `tools/smoke-live.cjs` expects a local browser install and a running local site.
+- `tools/smoke-test.ps1` is a lighter DOM-based sanity check for `http://localhost/`.
+
+## Cloudflare Pages
+
+The repo root is intentionally kept as a static site so Cloudflare Pages can publish it directly from GitHub without a build step.
+
+Recommended Pages settings:
+
+- Framework preset: `None`
+- Build command: leave blank
+- Build output directory: `/`
+
+The dev-only smoke tooling lives under `tools/`, and `.assetsignore` keeps that folder out of the published asset bundle.
+
+If you want Cloudflare Pages to ignore tooling-only commits, use Build watch paths like this:
+
+- Include paths: `*`
+- Exclude paths: `tools/*`
+- Exclude paths: `README.md`
+- Exclude paths: `.gitignore`
+- Exclude paths: `.assetsignore`
+
+That setup keeps normal app changes deploying, while README or local-tooling updates do not trigger a new Pages build.
 
 ## Project Structure
 
@@ -105,17 +128,8 @@ Notes:
 - `mlb-worker.js`
   Worker-side MLB polling, fallbacks, event classification, and normalized-state generation.
 
-- `assets/team-logos/`
-  Local assets used by the interface.
-
-- `smoke-live.cjs`
-  Playwright-based screenshot smoke test.
-
-- `smoke-test.ps1`
-  Lightweight browser DOM smoke test.
-
-- `audit-team-logos.cjs`
-  Utility script for checking MLB logo asset availability and aspect ratios.
+- `tools/`
+  Local-only smoke tests and helper scripts. These are not needed for the live site.
 
 ## Tinkering Guide
 

@@ -1,9 +1,11 @@
-const fs = require('fs');
-const path = require('path');
-const { chromium } = require('playwright-core');
+const fs = require("fs");
+const path = require("path");
+const { chromium } = require("playwright-core");
+
+const rootDir = path.resolve(__dirname, "..");
 
 function loadTeams() {
-  const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const appJs = fs.readFileSync(path.join(rootDir, "app.js"), "utf8");
   const matches = [...appJs.matchAll(/\{\s*id:\s*(\d+),\s*name:\s*"([^"]+)",\s*abbr:\s*"([^"]+)"\s*\}/g)];
   return matches.map((match) => ({
     id: Number(match[1]),
@@ -13,16 +15,18 @@ function loadTeams() {
 }
 
 async function main() {
-  const outputPath = process.argv[2] || '.smoke/team-logo-audit.json';
+  const outputPath = process.argv[2]
+    ? path.resolve(process.cwd(), process.argv[2])
+    : path.join(rootDir, ".smoke", "team-logo-audit.json");
   const teams = loadTeams();
 
   const browser = await chromium.launch({
-    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     headless: true,
   });
 
   const page = await browser.newPage();
-  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.setContent("<!doctype html><html><body></body></html>");
 
   const audit = await page.evaluate(async (teams) => {
     async function probe(team) {
@@ -63,7 +67,7 @@ async function main() {
     return rows;
   }, teams);
 
-  fs.mkdirSync(path.dirname(path.resolve(outputPath)), { recursive: true });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, JSON.stringify(audit, null, 2));
 
   const sorted = audit

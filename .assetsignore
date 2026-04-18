@@ -1,0 +1,5 @@
+# Publish only the browser app files from the repo root.
+tools/
+README.md
+.gitignore
+.assetsignore

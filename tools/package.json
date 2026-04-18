@@ -1,0 +1,18 @@
+{
+  "name": "mlb-realtime-second-screen-dashboard-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Local smoke tests and utility scripts for the MLB Realtime Second-Screen Dashboard.",
+  "scripts": {
+    "check:app": "node --check ..\\app.js",
+    "check:worker": "node --check ..\\mlb-worker.js",
+    "check": "npm run check:app && npm run check:worker",
+    "smoke:pregame": "node .\\smoke-live.cjs pregame",
+    "smoke:live": "node .\\smoke-live.cjs live",
+    "smoke:final": "node .\\smoke-live.cjs final",
+    "smoke:dom": "powershell -ExecutionPolicy Bypass -File .\\smoke-test.ps1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.59.1"
+  }
+}
