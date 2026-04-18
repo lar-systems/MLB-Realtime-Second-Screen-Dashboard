@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   teamId: "mlb.teamId",
   lastState: "mlb.lastState",
   debugVisible: "mlb.debugVisible",
+  stateVersion: "mlb.stateVersion",
 };
 
 const TEAM_OPTIONS = [
@@ -156,7 +157,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-18-0019",
+    appVersion: "debug-2026-04-18-0020",
   },
 };
 
@@ -260,6 +261,7 @@ const elements = {
 function init() {
   populateTeamSelect();
   applyTeamTheme(Number(elements.teamSelect.value));
+  syncCachedStateVersion();
   bindEvents();
   restoreDebugVisibility();
   renderStartupState();
@@ -2023,6 +2025,7 @@ function setBanner(message, isError) {
 
 function saveState(nextState) {
   localStorage.setItem(STORAGE_KEYS.lastState, JSON.stringify(nextState));
+  localStorage.setItem(STORAGE_KEYS.stateVersion, state.debug.appVersion);
 }
 
 function loadCachedState() {
@@ -2032,6 +2035,17 @@ function loadCachedState() {
   } catch {
     return null;
   }
+}
+
+function syncCachedStateVersion() {
+  const storedVersion = localStorage.getItem(STORAGE_KEYS.stateVersion);
+
+  if (storedVersion === state.debug.appVersion) {
+    return;
+  }
+
+  localStorage.removeItem(STORAGE_KEYS.lastState);
+  localStorage.setItem(STORAGE_KEYS.stateVersion, state.debug.appVersion);
 }
 
 function formatDateTime(value) {
