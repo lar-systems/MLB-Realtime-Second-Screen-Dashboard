@@ -12,6 +12,7 @@ Live demo: https://mlb.lar.systems/
 - Switches between `pregame`, `live`, and `final` layouts.
 - Polls MLB data in a Web Worker and normalizes it before the UI renders anything.
 - Shows probable starters, live batter/pitcher cards, inning state, bases, linescore, recent play text, and a league scoreboard strip.
+- Falls back to recent league final scores when there are no other live games elsewhere.
 - Includes mock modes and debug controls so you can work on the interface without waiting for a real game state.
 
 ## Why The Architecture Looks This Way

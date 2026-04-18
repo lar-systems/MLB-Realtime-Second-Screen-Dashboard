@@ -137,6 +137,7 @@ async function fetchDashboardState() {
     fetchLeagueScoreboardGames(),
   ]);
   const activeGames = buildActiveGames(leagueGames);
+  const recentGames = buildRecentGames(leagueGames);
   const liveGame = relevantGames.find(isLiveGame);
   const pregameLikeGame = relevantGames.find(isPregameCandidate);
   const upcomingGame = relevantGames.find(isUpcomingGame);
@@ -148,32 +149,32 @@ async function fetchDashboardState() {
   if (liveGame) {
     const liveFeed = await fetchLiveFeed(liveGame.gamePk, { allowNotFound: true });
     if (liveFeed) {
-      return withActiveGames(normalizeLiveState(liveFeed), activeGames);
+      return withScoreboardGames(normalizeLiveState(liveFeed), activeGames, recentGames);
     }
     const partialLive = await fetchPartialLiveResources(liveGame.gamePk);
     if (hasPartialLiveResources(partialLive)) {
-      return withActiveGames(normalizePartialLiveState(liveGame, partialLive), activeGames);
+      return withScoreboardGames(normalizePartialLiveState(liveGame, partialLive), activeGames, recentGames);
     }
-    return withActiveGames(normalizeScheduleLiveFallback(liveGame), activeGames);
+    return withScoreboardGames(normalizeScheduleLiveFallback(liveGame), activeGames, recentGames);
   }
 
   if (pregameLikeGame) {
-    return withActiveGames(await normalizePregameState(pregameLikeGame, previousCompletedGame, upcomingSchedule), activeGames);
+    return withScoreboardGames(await normalizePregameState(pregameLikeGame, previousCompletedGame, upcomingSchedule), activeGames, recentGames);
   }
 
   if (upcomingGame) {
-    return withActiveGames(await normalizePregameState(upcomingGame, previousCompletedGame, upcomingSchedule), activeGames);
+    return withScoreboardGames(await normalizePregameState(upcomingGame, previousCompletedGame, upcomingSchedule), activeGames, recentGames);
   }
 
   if (recentFinal) {
     const liveFeed = await fetchLiveFeed(recentFinal.gamePk, { allowNotFound: true });
     if (liveFeed) {
-      return withActiveGames(normalizeFinalState(liveFeed, upcomingGame), activeGames);
+      return withScoreboardGames(normalizeFinalState(liveFeed, upcomingGame), activeGames, recentGames);
     }
-    return withActiveGames(normalizeScheduleFinalFallback(recentFinal, upcomingGame), activeGames);
+    return withScoreboardGames(normalizeScheduleFinalFallback(recentFinal, upcomingGame), activeGames, recentGames);
   }
 
-  return withActiveGames(buildNoGameState(workerState.teamId), activeGames);
+  return withScoreboardGames(buildNoGameState(workerState.teamId), activeGames, recentGames);
 }
 
 // The schedule window is wider than "today" so the dashboard can still show a
@@ -1744,10 +1745,11 @@ function buildUpcomingSchedule(games, referenceGame = null) {
     .slice(0, 6);
 }
 
-function withActiveGames(nextState, activeGames) {
+function withScoreboardGames(nextState, activeGames, recentGames) {
   return {
     ...nextState,
     activeGames: Array.isArray(activeGames) ? activeGames : [],
+    recentGames: Array.isArray(recentGames) ? recentGames : [],
   };
 }
 
@@ -1758,29 +1760,50 @@ function buildActiveGames(games) {
     .map(normalizeActiveGameSummary);
 }
 
+function buildRecentGames(games) {
+  return games
+    .filter(isFinalGame)
+    .sort((left, right) => recentGameSortValue(left) - recentGameSortValue(right))
+    .map((game) => normalizeScoreboardGameSummary(game, "final"));
+}
+
 function activeGameSortValue(game) {
   const liveWeight = isLiveGame(game) ? 0 : 1;
   const gameTime = new Date(game?.gameDate || 0).getTime();
   return liveWeight * 1_000_000_000_000 + (Number.isFinite(gameTime) ? gameTime : 0);
 }
 
+function recentGameSortValue(game) {
+  const gameTime = new Date(game?.gameDate || 0).getTime();
+  return Number.isFinite(gameTime) ? -gameTime : Number.POSITIVE_INFINITY;
+}
+
 function normalizeActiveGameSummary(game) {
+  return normalizeScoreboardGameSummary(game, "active");
+}
+
+function normalizeScoreboardGameSummary(game, kind) {
   const away = normalizeTeamIdentity(game?.teams?.away?.team);
   const home = normalizeTeamIdentity(game?.teams?.home?.team);
   const linescore = game?.linescore || {};
+  const awayScore = game?.teams?.away?.score ?? linescore?.teams?.away?.runs ?? null;
+  const homeScore = game?.teams?.home?.score ?? linescore?.teams?.home?.runs ?? null;
 
   return {
+    kind,
     gamePk: game?.gamePk ?? null,
     homeTeamId: home.id,
     away: {
       ...away,
-      score: game?.teams?.away?.score ?? linescore?.teams?.away?.runs ?? null,
+      score: awayScore,
     },
     home: {
       ...home,
-      score: game?.teams?.home?.score ?? linescore?.teams?.home?.runs ?? null,
+      score: homeScore,
     },
-    status: buildActiveGameStatus(game),
+    status: kind === "final" ? buildRecentGameStatus(game) : buildActiveGameStatus(game),
+    actionLabel: "Home Team",
+    winnerSide: kind === "final" ? resolveWinningSide(awayScore, homeScore) : null,
   };
 }
 
@@ -1810,6 +1833,10 @@ function buildActiveGameStatus(game) {
   }
 
   return `In ${inning}`;
+}
+
+function buildRecentGameStatus(game) {
+  return game?.status?.detailedState || game?.status?.abstractGameState || "Final";
 }
 
 function getLastPlay(allPlays) {

@@ -156,7 +156,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-17-0006",
+    appVersion: "debug-2026-04-18-0003",
   },
 };
 
@@ -225,6 +225,7 @@ const elements = {
   matchupGrid: document.querySelector("#matchup-grid"),
   detailsGrid: document.querySelector("#details-grid"),
   activeGamesPanel: document.querySelector("#active-games-panel"),
+  activeGamesTitle: document.querySelector("#active-games-title"),
   activeGamesMeta: document.querySelector("#active-games-meta"),
   activeGamesStrip: document.querySelector("#active-games-strip"),
   batterCard: document.querySelector("#matchup-grid .player-card:first-child"),
@@ -929,7 +930,9 @@ function renderPregame(nextState) {
   setLinescoreLabel(buildPreviousGameLabel(previousGame));
   renderLinescore(previousGame?.linescore || [], {
     awayLabel: previousGame?.away?.abbr || previousGame?.away?.name || "AWY",
+    awayLogo: previousGame?.away?.logoUrl || "",
     homeLabel: previousGame?.home?.abbr || previousGame?.home?.name || "HME",
+    homeLogo: previousGame?.home?.logoUrl || "",
     awayTotals: buildFixedLinescoreTotals(previousGame?.awayScore, previousGame?.awayHits, previousGame?.awayErrors),
     homeTotals: buildFixedLinescoreTotals(previousGame?.homeScore, previousGame?.homeHits, previousGame?.homeErrors),
     awayLabelClass: buildPreviousGameWinnerLabelClass(previousGame, "away"),
@@ -1663,6 +1666,8 @@ function renderLinescore(linescore, options = {}) {
 
   const awayLabel = options.awayLabel || state.current?.live?.away?.abbr || state.current?.live?.away?.name || "AWY";
   const homeLabel = options.homeLabel || state.current?.live?.home?.abbr || state.current?.live?.home?.name || "HME";
+  const awayLogo = options.awayLogo || state.current?.live?.away?.logoUrl || "";
+  const homeLogo = options.homeLogo || state.current?.live?.home?.logoUrl || "";
   const displayedInnings = buildDisplayedInnings(linescore);
   const awayTotals = options.awayTotals || calculateLinescoreTotals(displayedInnings, "away");
   const homeTotals = options.homeTotals || calculateLinescoreTotals(displayedInnings, "home");
@@ -1700,14 +1705,14 @@ function renderLinescore(linescore, options = {}) {
         </thead>
         <tbody>
           <tr>
-            <th scope="row" class="linescore-team-label${awayLabelClass}">${awayLabel}</th>
+            <th scope="row" class="linescore-team-label${awayLabelClass}">${buildLinescoreTeamLabelMarkup(awayLabel, awayLogo)}</th>
             ${awayCells}
             <td class="linescore-total-cell">${awayTotals.runs}</td>
             <td class="linescore-total-cell">${awayTotals.hits}</td>
             <td class="linescore-total-cell">${awayTotals.errors}</td>
           </tr>
           <tr>
-            <th scope="row" class="linescore-team-label${homeLabelClass}">${homeLabel}</th>
+            <th scope="row" class="linescore-team-label${homeLabelClass}">${buildLinescoreTeamLabelMarkup(homeLabel, homeLogo)}</th>
             ${homeCells}
             <td class="linescore-total-cell">${homeTotals.runs}</td>
             <td class="linescore-total-cell">${homeTotals.hits}</td>
@@ -2656,29 +2661,58 @@ function renderUpcomingSchedule(scheduleItems) {
 }
 
 function renderActiveGames(nextState) {
-  if (!elements.activeGamesPanel || !elements.activeGamesStrip) {
+  if (!elements.activeGamesPanel || !elements.activeGamesStrip || !elements.activeGamesTitle) {
     return;
   }
 
   const currentGamePk = nextState?.live?.gamePk || nextState?.nextGame?.gamePk || nextState?.final?.gamePk || null;
-  const items = (Array.isArray(nextState?.activeGames) ? nextState.activeGames : [])
+  const activeItems = (Array.isArray(nextState?.activeGames) ? nextState.activeGames : [])
+    .filter((game) => game?.gamePk && game.gamePk !== currentGamePk);
+  const recentItems = (Array.isArray(nextState?.recentGames) ? nextState.recentGames : [])
     .filter((game) => game?.gamePk && game.gamePk !== currentGamePk);
 
-  if (!items.length) {
+  if (!activeItems.length && !recentItems.length) {
     elements.activeGamesPanel.hidden = true;
     elements.activeGamesStrip.innerHTML = "";
+    elements.activeGamesTitle.textContent = "Other Active Games";
     if (elements.activeGamesMeta) {
       elements.activeGamesMeta.textContent = "";
     }
     return;
   }
 
+  const isFallbackFinalBoard = !activeItems.length;
+  const items = isFallbackFinalBoard ? recentItems : activeItems;
+
   elements.activeGamesPanel.hidden = false;
+  elements.activeGamesTitle.textContent = isFallbackFinalBoard ? "Recent Final Scores" : "Other Active Games";
   if (elements.activeGamesMeta) {
-    elements.activeGamesMeta.textContent = `${items.length} game${items.length === 1 ? "" : "s"} live elsewhere`;
+    elements.activeGamesMeta.textContent = isFallbackFinalBoard
+      ? `${items.length} recent final${items.length === 1 ? "" : "s"} elsewhere`
+      : `${items.length} game${items.length === 1 ? "" : "s"} live elsewhere`;
   }
 
   elements.activeGamesStrip.innerHTML = items.map((item) => renderActiveGameCard(item)).join("");
+}
+
+function buildLinescoreTeamLabelMarkup(label, logoUrl) {
+  const safeLabel = escapeHtml(label || "");
+  const logoSrc = String(logoUrl || "").trim();
+
+  if (!logoSrc) {
+    return `<span class="linescore-team-identity"><span class="linescore-team-text">${safeLabel}</span></span>`;
+  }
+
+  return `
+    <span class="linescore-team-identity">
+      ${buildLogoBadgeMarkup(logoSrc, "", {
+        variant: "inline",
+        imageClass: "linescore-team-logo",
+        badgeClassName: "linescore-logo-badge",
+      })}
+      <span class="linescore-team-text">${safeLabel}</span>
+    </span>
+  `;
 }
 
 function renderActiveGameCard(item) {
@@ -2692,29 +2726,36 @@ function renderActiveGameCard(item) {
   const awayScore = escapeHtml(String(item?.away?.score ?? "-"));
   const homeScore = escapeHtml(String(item?.home?.score ?? "-"));
   const status = escapeHtml(item?.status || "Live");
+  const actionLabel = escapeHtml(item?.actionLabel || "Home Team");
   const label = escapeHtml(`Open ${homeName} dashboard`);
+  const winnerSide = item?.winnerSide === "away" || item?.winnerSide === "home" ? item.winnerSide : "";
+  const cardClassName = item?.kind === "final"
+    ? "active-game-card active-game-card-final"
+    : "active-game-card";
+  const awayWinnerClass = winnerSide === "away" ? " is-winner" : "";
+  const homeWinnerClass = winnerSide === "home" ? " is-winner" : "";
 
   return `
     <button
-      class="active-game-card"
+      class="${cardClassName}"
       type="button"
       data-home-team-id="${Number.isFinite(homeTeamId) ? homeTeamId : ""}"
       aria-label="${label}"
     >
       <div class="active-game-card-header">
         <span class="active-game-card-status">${status}</span>
-        <span class="active-game-card-action">Home Team</span>
+        <span class="active-game-card-action">${actionLabel}</span>
       </div>
       <div class="active-game-card-body">
         <div class="active-game-team-row">
-          <div class="active-game-team-label">
+          <div class="active-game-team-label${awayWinnerClass}">
             ${buildLogoBadgeMarkup(awayLogo, `${awayName} logo`, { variant: "inline", imageClass: "active-game-team-logo" })}
             <span>${awayAbbr}</span>
           </div>
           <span class="active-game-team-score">${awayScore}</span>
         </div>
         <div class="active-game-team-row">
-          <div class="active-game-team-label">
+          <div class="active-game-team-label${homeWinnerClass}">
             ${buildLogoBadgeMarkup(homeLogo, `${homeName} logo`, { variant: "inline", imageClass: "active-game-team-logo" })}
             <span>${homeAbbr}</span>
           </div>
@@ -2754,26 +2795,29 @@ function buildLogoBadgeMarkup(logoUrl, alt, options = {}) {
     variant = "default",
     imageClass = "",
     placeholderClass = "",
+    badgeClassName = "",
   } = options;
   const logoSrc = String(logoUrl || "").trim();
   const badgeClass = variant === "inline"
     ? "logo-badge logo-badge-inline"
     : "logo-badge";
+  const finalBadgeClass = `${badgeClass} ${badgeClassName}`.trim();
   const badgeStyle = escapeHtml(buildLogoBadgeStyle(extractTeamIdFromLogoUrl(logoSrc)));
   const imageClassName = escapeHtml(imageClass);
   const placeholderClassName = escapeHtml(placeholderClass);
+  const safeAlt = alt ? escapeHtml(alt) : "";
 
   if (!logoSrc) {
     return `
-      <span class="${badgeClass}" style="${badgeStyle}" aria-hidden="true">
+      <span class="${finalBadgeClass}" style="${badgeStyle}" aria-hidden="true">
         <span class="logo-badge-placeholder ${placeholderClassName}"></span>
       </span>
     `;
   }
 
   return `
-    <span class="${badgeClass}" style="${badgeStyle}">
-      <img class="${imageClassName}" src="${escapeHtml(logoSrc)}" alt="${escapeHtml(alt || "Team logo")}">
+    <span class="${finalBadgeClass}" style="${badgeStyle}">
+      <img class="${imageClassName}" src="${escapeHtml(logoSrc)}" alt="${safeAlt}">
     </span>
   `;
 }
