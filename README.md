@@ -4,6 +4,8 @@ An MLB "realtime" game tracker built as a second-screen experience for following
 
 The goal is to feel closer to the jumbotron-style displays you see in ballparks than to a traditional stats page: big state changes, strong visual hierarchy, live inning context, player cards, out-of-town scores, and celebration overlays that react to important moments.
 
+Live demo: https://mlb.lar.systems/
+
 ## What It Does
 
 - Tracks one selected MLB team at a time.

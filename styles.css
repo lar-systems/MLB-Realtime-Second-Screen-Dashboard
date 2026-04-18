@@ -1996,6 +1996,50 @@ select {
   margin-top: 10px;
 }
 
+.site-footer {
+  margin-top: 12px;
+  padding: 10px 2px 2px;
+  display: grid;
+  gap: 4px;
+}
+
+.site-footer-eyebrow,
+.site-footer-copy {
+  margin: 0;
+}
+
+.site-footer-eyebrow {
+  color: rgba(157, 179, 201, 0.64);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-shadow: var(--text-shadow-soft);
+}
+
+.site-footer-copy {
+  max-width: 96ch;
+  color: rgba(157, 179, 201, 0.78);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.site-footer a {
+  color: rgba(var(--accent-contrast-rgb), 0.92);
+  text-decoration-color: rgba(var(--accent-contrast-rgb), 0.46);
+  text-underline-offset: 0.16em;
+}
+
+.site-footer a:hover {
+  color: var(--text);
+  text-decoration-color: rgba(var(--accent-contrast-rgb), 0.82);
+}
+
+.site-footer a:focus-visible {
+  outline: 2px solid rgba(var(--accent-contrast-rgb), 0.96);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .debug-output {
   margin: 0;
   white-space: pre-wrap;
