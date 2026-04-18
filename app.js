@@ -2266,10 +2266,10 @@ function formatPitchHandLong(value) {
 }
 
 function buildProbablePitcherMeta(teamName, roleLabel, throwsValue) {
-  const lines = [`${teamName || "Team"} ${roleLabel}`];
+  const lines = ["Probable starting pitcher"];
   const fullHand = formatPitchHandLong(throwsValue);
   if (fullHand) {
-    lines.push(`Throws: ${fullHand}`);
+    lines.push(`Throws ${fullHand}`);
   }
   return lines.join("\n");
 }
