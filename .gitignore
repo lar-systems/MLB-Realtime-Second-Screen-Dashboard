@@ -1,3 +1,13 @@
 node_modules/
 .smoke/
 npm-debug.log*
+
+# Local project memory and planning docs stay private.
+AGENTS.md
+PROJECT.md
+mlb_second_screen_dashboard_spec.md
+
+# Common local OS/editor noise.
+.DS_Store
+Thumbs.db
+desktop.ini

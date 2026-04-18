@@ -1,77 +1,60 @@
-# MLB Second-Screen Dashboard
+# MLB Realtime Second-Screen Dashboard
 
-Static browser-first MLB dashboard for a single selected MLB team.
+An MLB "realtime" game tracker built as a second-screen experience for following your favorite team during live games.
 
-This project is intentionally split into two clear halves:
+The goal is to feel closer to the jumbotron-style displays you see in ballparks than to a traditional stats page: big state changes, strong visual hierarchy, live inning context, player cards, out-of-town scores, and celebration overlays that react to important moments.
 
-- `mlb-worker.js` decides what the baseball state means.
-- `app.js` decides how that state should look on screen.
+## What It Does
 
-That separation is the most important idea in this repo. If a future edit needs
-raw MLB payload changes, it should usually happen in the worker. If it needs a
-layout, wording, or visual treatment change, it should usually happen in the
-main-thread app.
+- Tracks one selected MLB team at a time.
+- Switches between `pregame`, `live`, and `final` layouts.
+- Polls MLB data in a Web Worker and normalizes it before the UI renders anything.
+- Shows probable starters, live batter/pitcher cards, inning state, bases, linescore, recent play text, and a league scoreboard strip.
+- Includes mock modes and debug controls so you can work on the interface without waiting for a real game state.
 
-## What The App Does
+## Why The Architecture Looks This Way
 
-The dashboard always renders one normalized state object in one of three modes:
+This project stays intentionally simple:
 
-- `pregame`
-- `live`
-- `final`
+- `index.html` provides the static shell.
+- `styles.css` owns the visual system.
+- `app.js` owns rendering, timers, persistence, and UI-only behavior.
+- `mlb-worker.js` owns MLB polling, fallback logic, and normalization.
 
-Those modes intentionally share the same broad shell:
+The important design rule is that the UI only reads normalized state. Raw MLB payload interpretation stays in the worker so the presentation layer is easier to tweak.
 
-- left team area
-- center game-state area
-- right team area
-- lower details row
+## Core Modes
 
-That lets the screen feel stable while the content changes.
+### Pregame
 
-## File Guide
+- Shows the next scheduled matchup.
+- Uses team records in the hero score slots.
+- Highlights probable starters.
+- Surfaces the previous completed game and the next few scheduled games.
 
-- `index.html`
-  Static shell and DOM targets. Most IDs are stable on purpose because
-  `app.js` renders directly into them.
+### Live
 
-- `styles.css`
-  Visual system, spacing, card treatments, watermark handling, and responsive
-  behavior.
+- Shows the current score, inning, balls, strikes, outs, and basepaths.
+- Highlights the active batter and pitcher.
+- Includes a live linescore and recent play text.
+- Surfaces out-of-town active games in a full-width scoreboard row.
 
-- `app.js`
-  Main-thread controller. It owns:
-  - startup
-  - worker wiring
-  - rendering
-  - countdown / elapsed timers
-  - local storage
-  - player image presentation
-  - debug output
+### Final
 
-- `mlb-worker.js`
-  Worker-side data controller. It owns:
-  - MLB polling
-  - game selection
-  - mode classification
-  - normalization
-  - fallback logic
-  - mock mode
+- Shows the completed result and pivots toward the next scheduled game.
+- Triggers a selected-team `WIN THE GAME` celebration when your team closes it out.
 
-- `smoke-live.cjs`
-  Localhost smoke test that opens the dashboard in headless Chrome, selects a
-  team, cycles to a target mode, prints a small JSON summary, and saves a
-  screenshot.
+## Local Setup
 
-- `AGENTS.md`
-  Project guardrails and implementation notes for the coding agent.
+### Requirements
 
-- `PROJECT.md`
-  Ongoing project tracker and memory file.
+- A modern desktop browser
+- A local static server
+- Node.js if you want to run the smoke scripts
 
-## Run Locally
+### Run The Dashboard
 
-Use any static server. Example:
+Serve the project from a local web server. Example:
 
 ```powershell
 python -m http.server 8080
@@ -83,254 +66,78 @@ Then open:
 http://localhost:8080
 ```
 
-Do not run this app from `file:///`. Web Workers and some browser features are
-not reliable there.
+Do not run the app from `file:///`. Web Workers and some browser features will not behave reliably there.
 
-## Runtime Architecture
+## Controls In The UI
 
-The app follows this flow:
+- Team dropdown: switches the tracked club.
+- `Cycle Test States`: rotates through mock `pregame`, `live`, and `final` states.
+- `Cycle Action Events`: previews overlay moments without waiting for a live feed event.
+- `Show Debug` / `Hide Debug`: reveals the normalized state and worker status panel.
 
-1. `app.js` restores the selected team and the last rendered state.
-2. `app.js` starts `mlb-worker.js`.
-3. The worker polls MLB endpoints.
-4. The worker returns one normalized state object.
-5. `app.js` renders that state into the shared layout.
-6. The main thread keeps lightweight display timers ticking between worker
-   updates.
+## Smoke Checks
 
-The worker should be the only place that interprets raw MLB payloads. That
-keeps the presentation layer easier to edit and review.
-
-## Normalized State Contract
-
-The state shape evolves, but the high-level contract looks like this:
-
-```js
-{
-  mode: "pregame" | "live" | "final",
-  team: { id, name, abbr, logoUrl },
-  nextGame: { ... } | null,
-  activeGames: [ ... ],
-  upcomingSchedule: [ ... ],
-  previousGame: { ... } | null,
-  live: { ... } | null,
-  final: { ... } | null,
-  meta: {
-    sourceStatus,
-    lastSuccessfulUpdate,
-    lastError
-  }
-}
-```
-
-### Pregame
-
-Pregame uses the shared shell but changes the meaning of a few regions:
-
-- big numbers become team records, not scores
-- side cards become probable starters
-- center area becomes countdown or status messaging
-- linescore panel shows the previous completed game
-- notes panel becomes the upcoming schedule strip
-
-### Live
-
-Live focuses on immediate state:
-
-- current scores
-- inning / balls / strikes / outs
-- bases indicator
-- current batter and pitcher
-- inning-by-inning linescore
-- latest play text
-- full-width out-of-town active-games strip with click-to-switch home-team dashboards
-
-### Final
-
-Final is a transition state:
-
-- if the next game is known, it leans back toward pregame
-- if not, it remains a simpler completed-game view
-
-## MLB API Strategy
-
-The worker uses layered fallbacks because MLB data is not perfectly consistent
-for every `gamePk`.
-
-Preferred path:
-
-- `schedule` for discovery
-- `feed/live` for full game state
-
-Fallback path when `feed/live` is missing:
-
-- `boxscore`
-- `linescore`
-- `playByPlay`
-
-Last resort:
-
-- schedule-only fallback
-
-That is why `mlb-worker.js` includes both full-live and partial-live
-normalization paths.
-
-## Mock Mode
-
-Mock mode exists so layout work is not blocked by MLB endpoint behavior.
-
-- The worker can emit mock `pregame`, `live`, and `final` states.
-- `Cycle Test States` rotates through those states.
-- `Cycle Action Events` steps through the in-game overlay treatments without waiting for a live feed event.
-- The mock states intentionally mirror the real normalized contract.
-- Mock live state also carries sample active-game scoreboard cards for layout testing.
-
-If you change the normalized shape, update both:
-
-- the real normalization path
-- the mock state builder
-
-## Smoke Testing
-
-The main smoke test script is:
+These scripts are optional, but they are useful when you are changing layout or data flow.
 
 ```powershell
-& 'C:\Program Files\nodejs\node.exe' .\smoke-live.cjs live .smoke\live-state.png 141
+npm run check
+npm run smoke:pregame
+npm run smoke:live
+npm run smoke:final
 ```
 
-Arguments:
+Notes:
 
-1. target mode: `pregame`, `live`, or `final`
-2. screenshot output path
-3. team id
+- `smoke-live.cjs` expects a local browser install and a running local site.
+- `smoke-test.ps1` is a lighter DOM-based sanity check for `http://localhost/`.
 
-Examples:
-
-```powershell
-& 'C:\Program Files\nodejs\node.exe' .\smoke-live.cjs pregame .smoke\pregame-state.png 141
-& 'C:\Program Files\nodejs\node.exe' .\smoke-live.cjs live .smoke\live-state.png 141
-& 'C:\Program Files\nodejs\node.exe' .\smoke-live.cjs final .smoke\final-state.png 141
-```
-
-The smoke script is meant to catch:
-
-- app not booting
-- wrong mode on screen
-- hidden/visible section regressions
-- obvious image or layout regressions
-
-It is intentionally small, fast, and easy to tweak.
-
-## Editing Guide
-
-### If you want to change data sourcing or game logic
-
-Edit:
-
-- `mlb-worker.js`
-
-Examples:
-
-- different delayed/postponed behavior
-- alternate schedule selection rules
-- richer player normalization
-- different fallback priorities
-
-### If you want to change layout or wording
-
-Edit:
-
-- `app.js`
-- `styles.css`
-- sometimes `index.html`
-
-Examples:
-
-- move scores, records, or logos
-- change countdown wording
-- change player card composition
-- restyle the lower row
-
-### If you want to change markup targets
-
-Edit:
+## Project Structure
 
 - `index.html`
+  Static DOM shell and overlay markup.
+
+- `styles.css`
+  Dashboard layout, theme variables, celebration styling, cards, and responsive behavior.
+
 - `app.js`
+  Main-thread controller for rendering, timers, image handling, and local storage.
 
-Keep the element IDs in sync. `app.js` does most of its DOM lookups once at
-startup, so markup drift is one of the easiest ways to break the UI.
+- `mlb-worker.js`
+  Worker-side MLB polling, fallbacks, event classification, and normalized-state generation.
 
-## Important Implementation Notes
+- `assets/team-logos/`
+  Local assets used by the interface.
 
-### `init()` stays at the end of `app.js`
+- `smoke-live.cjs`
+  Playwright-based screenshot smoke test.
 
-This is important. The file now has enough top-level helpers and constants that
-startup rendering can hit a helper before later `const` declarations exist.
-Calling `init()` at the bottom avoids temporal-dead-zone bugs during boot.
+- `smoke-test.ps1`
+  Lightweight browser DOM smoke test.
 
-### Watermark logos are CSS-driven
+- `audit-team-logos.cjs`
+  Utility script for checking MLB logo asset availability and aspect ratios.
 
-The background team logos are not separate DOM images. `app.js` passes:
+## Tinkering Guide
 
-- logo URL
-- watermark position
-- watermark opacity
+If you want to change:
 
-through CSS custom properties on each team side.
+- Data sourcing, mode selection, play parsing, or fallback rules:
+  edit `mlb-worker.js`
 
-If a logo needs tuning, check:
+- Layout, text presentation, timing, celebration display, or theming:
+  edit `app.js` and `styles.css`
 
-- `setSideWatermark()`
-- `WATERMARK_PROFILES`
-- the watermark rules in `styles.css`
+- DOM structure or element IDs:
+  edit `index.html` and keep `app.js` selectors in sync
 
-### Team themes are local and contrast-checked
+The codebase already carries comments around the areas that are easiest to break while experimenting, especially the worker normalization path, portrait handling, linescore rendering, and celebration system.
 
-The MLB Stats API does not expose team color palettes, so `app.js` keeps a
-local `TEAM_THEMES` map keyed by team ID and derives the runtime CSS variables
-from that source.
+## Limitations
 
-The theme system intentionally keeps body text on a stable light-on-dark shell
-and only applies team colors to accents, borders, panel tinting, and background
-glows. Accent colors are lightened when needed to keep contrast readable
-against the dashboard surface.
+- This is a browser-first project, so it depends on MLB endpoints remaining accessible from the client.
+- Some MLB feeds are inconsistent or temporarily incomplete, which is why the worker has layered live-data fallbacks.
+- Player portraits and some live stat fields are not guaranteed for every game state.
 
-### Player portraits use `silo -> verify -> standard fallback`
+## Disclaimer
 
-MLB exposes a public headshot CDN pattern, but transparent/cutout delivery is
-not formally documented. The safe production behavior in `app.js` is:
-
-1. build the standard headshot URL and the transparency-oriented `silo` URL
-2. try `silo` first
-3. verify actual alpha on the returned image edge pixels
-4. if alpha is not clearly present, fall back to the standard headshot
-5. for opaque portraits, sample the portrait matte and use that color as the
-   portrait-column background so taller cards do not reveal the dark shell
-
-That means the UI never assumes transparency exists. Portrait cards must still
-look correct with an opaque MLB headshot.
-
-If portrait rendering breaks, inspect:
-
-- `setImage()`
-- `loadProcessedPortrait()`
-- `resolveBestHeadshot()`
-- `testTransparentCandidate()`
-
-### Linescore is table-based on purpose
-
-The linescore always pads to innings `1-9`, then expands for extra innings.
-That keeps the lower layout stable while still supporting longer games.
-
-## Recommended Review Workflow
-
-When reviewing or extending the app:
-
-1. Read this README.
-2. Check `index.html` for the shell and element IDs.
-3. Check `mlb-worker.js` for how the state is produced.
-4. Check `app.js` for how that state is rendered.
-5. Run a smoke screenshot for the state you changed.
-
-That path is much faster than reverse-engineering behavior from CSS alone.
+This project is an independent fan-made tracker and is not affiliated with or endorsed by Major League Baseball. MLB team names, marks, and data belong to their respective owners.

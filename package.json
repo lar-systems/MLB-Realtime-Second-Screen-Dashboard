@@ -1,16 +1,29 @@
 {
-  "name": "dev_mlb_baseball_display",
+  "name": "mlb-realtime-second-screen-dashboard",
   "version": "1.0.0",
-  "description": "Static browser-first MLB dashboard MVP for a single selected team.",
+  "description": "A browser-first MLB realtime second-screen dashboard for following one favorite team during live games.",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "check:app": "node --check app.js",
+    "check:worker": "node --check mlb-worker.js",
+    "check": "npm run check:app && npm run check:worker",
+    "smoke:pregame": "node .\\smoke-live.cjs pregame .smoke\\pregame-state.png 141",
+    "smoke:live": "node .\\smoke-live.cjs live .smoke\\live-state.png 141",
+    "smoke:final": "node .\\smoke-live.cjs final .smoke\\final-state.png 141",
+    "smoke:dom": "powershell -ExecutionPolicy Bypass -File .\\smoke-test.ps1"
   },
-  "keywords": [],
+  "keywords": [
+    "mlb",
+    "baseball",
+    "dashboard",
+    "second-screen",
+    "sports",
+    "realtime"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
+  "devDependencies": {
     "playwright-core": "^1.59.1"
   }
 }
