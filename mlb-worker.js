@@ -1805,7 +1805,7 @@ function normalizeScoreboardGameSummary(game, kind) {
       score: homeScore,
     },
     status: kind === "final" ? buildRecentGameStatus(game) : buildActiveGameStatus(game),
-    actionLabel: "Home Team",
+    actionLabel: kind === "final" ? formatScoreboardCardDateLabel(game?.gameDate) : buildActiveGameElapsedLabel(game),
     winnerSide: kind === "final" ? resolveWinningSide(awayScore, homeScore) : null,
   };
 }
@@ -1840,6 +1840,35 @@ function buildActiveGameStatus(game) {
 
 function buildRecentGameStatus(game) {
   return game?.status?.detailedState || game?.status?.abstractGameState || "Final";
+}
+
+function buildActiveGameElapsedLabel(game) {
+  const startMs = new Date(game?.gameDate || 0).getTime();
+  if (!Number.isFinite(startMs)) {
+    return "LIVE";
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - startMs);
+  const elapsedMinutes = Math.floor(elapsedMs / (60 * 1000));
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+
+  if (hours <= 0) {
+    return `${Math.max(1, minutes)}M`;
+  }
+
+  return minutes > 0 ? `${hours}H ${minutes}M` : `${hours}H`;
+}
+
+function formatScoreboardCardDateLabel(value) {
+  if (!value) {
+    return "FINAL";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value)).toUpperCase();
 }
 
 function getLastPlay(allPlays) {

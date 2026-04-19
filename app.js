@@ -153,6 +153,13 @@ const state = {
   worker: null,
   countdownTimer: null,
   current: null,
+  renderCache: {
+    linescoreKey: "",
+    upcomingScheduleKey: "",
+    upcomingScheduleHidden: null,
+    activeGamesKey: "",
+    activeGamesHidden: null,
+  },
   celebration: {
     lastSeenId: null,
     fadeTimer: null,
@@ -165,7 +172,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-19-0015",
+    appVersion: "debug-2026-04-19-0018",
   },
 };
 
@@ -1381,23 +1388,12 @@ function setImage(element, src, alt, options = {}) {
     return;
   }
 
-  if (
-    !src &&
-    options.preserveExisting !== false &&
-    !options.usePlayerFallback &&
-    element.dataset.sourceSrc &&
-    element.classList.contains("has-image") &&
-    !element.hidden
-  ) {
-    element.alt = alt || "";
-    return;
-  }
+  const nextSource = String(src || "");
+  const currentSource = String(element.dataset.sourceSrc || "");
 
   if (
-    src &&
     options.preserveExisting !== false &&
-    !options.usePlayerFallback &&
-    element.dataset.sourceSrc === src &&
+    currentSource === nextSource &&
     element.classList.contains("has-image") &&
     !element.hidden
   ) {
@@ -1412,20 +1408,20 @@ function setImage(element, src, alt, options = {}) {
   clearPortraitMatte(element);
   element.onerror = null;
   element.onload = null;
-  element.dataset.sourceSrc = src || "";
+  element.dataset.sourceSrc = nextSource;
 
-  const requestKey = `${src}|${Date.now()}|${Math.random()}`;
+  const requestKey = `${nextSource}|${Date.now()}|${Math.random()}`;
   element.dataset.requestKey = requestKey;
 
-  if (!src) {
+  if (!nextSource) {
     if (options.usePlayerFallback) {
       applyPlayerFallback(element, alt);
     }
     return;
   }
 
-  if (options.usePlayerFallback && !src.startsWith("data:")) {
-    loadProcessedPortrait(element, src, alt, options, requestKey);
+  if (options.usePlayerFallback && !nextSource.startsWith("data:")) {
+    loadProcessedPortrait(element, nextSource, alt, options, requestKey);
     return;
   }
 
@@ -1438,7 +1434,7 @@ function setImage(element, src, alt, options = {}) {
     element.removeAttribute("src");
   };
 
-  element.src = src;
+  element.src = nextSource;
   element.hidden = false;
   element.classList.add("has-image");
 }
@@ -1768,12 +1764,21 @@ function renderLinescore(linescore, options = {}) {
     : "";
 
   if (!linescore.length) {
-    elements.linescore.innerHTML = `
+    const emptyMarkup = `
       <div class="linescore-table-wrap">
         <div class="linescore-empty">${escapeHtml(options.emptyMessage || "Waiting for inning-by-inning data.")}</div>
         ${gameMetaMarkup}
       </div>
     `;
+    const emptyKey = JSON.stringify({
+      linescore: [],
+      emptyMessage: options.emptyMessage || "Waiting for inning-by-inning data.",
+      gameDateTime: options.gameDateTime || null,
+    });
+    if (state.renderCache.linescoreKey !== emptyKey) {
+      elements.linescore.innerHTML = emptyMarkup;
+      state.renderCache.linescoreKey = emptyKey;
+    }
     return;
   }
 
@@ -1823,7 +1828,7 @@ function renderLinescore(linescore, options = {}) {
     }),
   ].join("");
 
-  elements.linescore.innerHTML = `
+  const markup = `
     <div class="linescore-table-wrap">
       <div class="linescore-grid" role="img" aria-label="Inning-by-inning linescore">
         <div class="linescore-team-column">
@@ -1839,6 +1844,27 @@ function renderLinescore(linescore, options = {}) {
       ${gameMetaMarkup}
     </div>
   `;
+  const renderKey = JSON.stringify({
+    awayLabel,
+    awayLogo,
+    awayLabelClass: options.awayLabelClass || "",
+    homeLabel,
+    homeLogo,
+    homeLabelClass: options.homeLabelClass || "",
+    displayedInnings,
+    awayTotals,
+    homeTotals,
+    activeInning,
+    inningHalf,
+    gameDateTime: options.gameDateTime || null,
+  });
+
+  if (state.renderCache.linescoreKey === renderKey) {
+    return;
+  }
+
+  elements.linescore.innerHTML = markup;
+  state.renderCache.linescoreKey = renderKey;
 }
 
 function buildLinescoreStatColumnMarkup(header, awayValue, homeValue, options = {}) {
@@ -2819,7 +2845,7 @@ function hideUpcomingSchedule() {
     return;
   }
   elements.upcomingSchedule.hidden = true;
-  elements.upcomingSchedule.innerHTML = "";
+  state.renderCache.upcomingScheduleHidden = true;
 }
 
 // Pregame schedule items stay intentionally compact so the user can see the
@@ -2844,17 +2870,28 @@ function renderUpcomingSchedule(scheduleItems) {
   const items = Array.isArray(scheduleItems) ? scheduleItems.slice(0, 5) : [];
 
   if (!items.length) {
+    const emptyKey = "empty";
     elements.upcomingSchedule.hidden = false;
-    elements.upcomingSchedule.innerHTML = '<div class="schedule-empty">No additional games scheduled in this window.</div>';
+    if (state.renderCache.upcomingScheduleKey !== emptyKey) {
+      elements.upcomingSchedule.innerHTML = '<div class="schedule-empty">No additional games scheduled in this window.</div>';
+      state.renderCache.upcomingScheduleKey = emptyKey;
+    }
+    state.renderCache.upcomingScheduleHidden = false;
     return;
   }
 
-  elements.upcomingSchedule.hidden = false;
-  elements.upcomingSchedule.innerHTML = `
+  const markup = `
     <div class="schedule-strip" style="--schedule-columns: ${Math.max(items.length, 1)};">
       ${items.map((item) => renderScheduleItem(item)).join("")}
     </div>
   `;
+  const renderKey = JSON.stringify(items);
+  elements.upcomingSchedule.hidden = false;
+  if (state.renderCache.upcomingScheduleKey !== renderKey) {
+    elements.upcomingSchedule.innerHTML = markup;
+    state.renderCache.upcomingScheduleKey = renderKey;
+  }
+  state.renderCache.upcomingScheduleHidden = false;
 }
 
 function renderActiveGames(nextState) {
@@ -2870,8 +2907,14 @@ function renderActiveGames(nextState) {
 
   if (!activeItems.length && !recentItems.length) {
     elements.activeGamesPanel.hidden = true;
-    elements.activeGamesStrip.innerHTML = "";
-    elements.activeGamesTitle.textContent = "Other Active Games";
+    if (state.renderCache.activeGamesHidden !== true) {
+      elements.activeGamesTitle.textContent = "Other Active Games";
+      if (elements.activeGamesMeta) {
+        elements.activeGamesMeta.textContent = "";
+      }
+      state.renderCache.activeGamesHidden = true;
+    }
+    state.renderCache.activeGamesKey = "";
     if (elements.activeGamesMeta) {
       elements.activeGamesMeta.textContent = "";
     }
@@ -2881,15 +2924,23 @@ function renderActiveGames(nextState) {
   const isFallbackFinalBoard = !activeItems.length;
   const items = isFallbackFinalBoard ? recentItems : activeItems;
 
-  elements.activeGamesPanel.hidden = false;
-  elements.activeGamesTitle.textContent = isFallbackFinalBoard ? "Recent Final Scores" : "Other Active Games";
-  if (elements.activeGamesMeta) {
-    elements.activeGamesMeta.textContent = isFallbackFinalBoard
-      ? `${items.length} recent final${items.length === 1 ? "" : "s"} elsewhere`
-      : `${items.length} game${items.length === 1 ? "" : "s"} live elsewhere`;
-  }
+  const title = isFallbackFinalBoard ? "Recent Final Scores" : "Other Active Games";
+  const meta = isFallbackFinalBoard
+    ? `${items.length} recent final${items.length === 1 ? "" : "s"} elsewhere`
+    : `${items.length} game${items.length === 1 ? "" : "s"} live elsewhere`;
+  const markup = items.map((item) => renderActiveGameCard(item)).join("");
+  const renderKey = JSON.stringify({ title, meta, items });
 
-  elements.activeGamesStrip.innerHTML = items.map((item) => renderActiveGameCard(item)).join("");
+  elements.activeGamesPanel.hidden = false;
+  if (state.renderCache.activeGamesKey !== renderKey) {
+    elements.activeGamesTitle.textContent = title;
+    if (elements.activeGamesMeta) {
+      elements.activeGamesMeta.textContent = meta;
+    }
+    elements.activeGamesStrip.innerHTML = markup;
+    state.renderCache.activeGamesKey = renderKey;
+  }
+  state.renderCache.activeGamesHidden = false;
 }
 
 function buildLinescoreTeamLabelMarkup(label, logoUrl) {
