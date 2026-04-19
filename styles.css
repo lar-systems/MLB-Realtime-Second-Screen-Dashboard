@@ -2654,6 +2654,7 @@ select {
   }
 
   .score-strip {
+    position: relative;
     margin-top: 0;
     padding: 10px;
     gap: 10px;
@@ -2672,7 +2673,7 @@ select {
     gap: 8px 10px;
   }
 
-  .score-strip.is-live-layout::before {
+  .score-strip.has-mobile-live-watermark::before {
     content: "";
     position: absolute;
     inset: 12px;
@@ -2687,13 +2688,19 @@ select {
     z-index: 0;
   }
 
-  .score-strip.is-live-layout.has-mobile-live-watermark::before {
+  .score-strip.has-mobile-live-watermark::before {
     opacity: 0.06;
   }
 
-  .score-strip.is-live-layout > * {
+  .score-strip.has-mobile-live-watermark > * {
     position: relative;
     z-index: 1;
+  }
+
+  .score-strip.has-mobile-live-watermark .score-side::before {
+    content: none;
+    background-image: none;
+    opacity: 0;
   }
 
   .score-strip.is-live-layout .score-side.score-side-live {
@@ -2701,8 +2708,6 @@ select {
   }
 
   .score-strip.is-live-layout .score-side.score-side-live::before {
-    content: none;
-    background-image: none;
     opacity: 0;
   }
 
@@ -2900,7 +2905,7 @@ select {
   }
 
   .score-value.score-value-record {
-    font-size: clamp(1.55rem, 10vw, 2.1rem);
+    font-size: clamp(1.34rem, 8.6vw, 1.82rem);
   }
 
   .score-side.score-side-compact .score-value {
@@ -2909,7 +2914,8 @@ select {
 
   .score-side-meta {
     min-height: 0;
-    gap: 2px;
+    gap: 1px;
+    margin-top: -1px;
     width: fit-content;
     align-self: flex-end;
     justify-items: end;
@@ -2917,9 +2923,9 @@ select {
   }
 
   .team-standing {
-    font-size: 0.76rem;
+    font-size: 0.72rem;
     letter-spacing: 0.02em;
-    line-height: 1.1;
+    line-height: 1;
   }
 
   .center-state {

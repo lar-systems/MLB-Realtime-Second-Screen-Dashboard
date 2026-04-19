@@ -13,6 +13,10 @@ const STORAGE_KEYS = {
   stateVersion: "mlb.stateVersion",
 };
 
+const URL_PARAMS = {
+  team: "t",
+};
+
 const TEAM_OPTIONS = [
   { id: 108, name: "Los Angeles Angels", abbr: "LAA" },
   { id: 109, name: "Arizona Diamondbacks", abbr: "AZ" },
@@ -45,6 +49,10 @@ const TEAM_OPTIONS = [
   { id: 147, name: "New York Yankees", abbr: "NYY" },
   { id: 158, name: "Milwaukee Brewers", abbr: "MIL" },
 ];
+
+const TEAM_BY_ID = new Map(TEAM_OPTIONS.map((team) => [team.id, team]));
+const TEAM_BY_SLUG = new Map(TEAM_OPTIONS.map((team) => [buildTeamSlug(team), team]));
+const TEAM_BY_ABBR = new Map(TEAM_OPTIONS.map((team) => [team.abbr.toLowerCase(), team]));
 
 // MLB Stats API team payloads do not include brand colors, so keep a local,
 // reviewable palette keyed by team ID and derive accessible UI tokens from it.
@@ -157,7 +165,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-19-0008",
+    appVersion: "debug-2026-04-19-0015",
   },
 };
 
@@ -274,19 +282,21 @@ function populateTeamSelect() {
     `<option value="${team.id}">${team.name}</option>`
   )).join("");
 
-  const savedTeamId = Number(localStorage.getItem(STORAGE_KEYS.teamId) || TEAM_OPTIONS[0].id);
-  elements.teamSelect.value = String(savedTeamId);
+  const initialTeamId = resolveInitialTeamId();
+  elements.teamSelect.value = String(initialTeamId);
+  syncTeamQueryParam(initialTeamId);
 }
 
 function handleTeamSelection(teamId) {
   const resolvedTeamId = Number(teamId);
-  if (!Number.isFinite(resolvedTeamId)) {
+  if (!Number.isFinite(resolvedTeamId) || !TEAM_BY_ID.has(resolvedTeamId)) {
     return;
   }
 
   elements.teamSelect.value = String(resolvedTeamId);
   localStorage.setItem(STORAGE_KEYS.teamId, String(resolvedTeamId));
   applyTeamTheme(resolvedTeamId);
+  syncTeamQueryParam(resolvedTeamId);
 
   if (state.worker) {
     state.worker.postMessage({ type: "SET_TEAM", teamId: resolvedTeamId });
@@ -362,6 +372,73 @@ function setDebugVisibility(isVisible, options = {}) {
   if (persist) {
     localStorage.setItem(STORAGE_KEYS.debugVisible, String(state.debug.isVisible));
   }
+}
+
+function resolveInitialTeamId() {
+  const urlTeamId = resolveTeamIdFromUrl();
+  if (Number.isFinite(urlTeamId) && TEAM_BY_ID.has(urlTeamId)) {
+    return urlTeamId;
+  }
+
+  const savedTeamId = Number(localStorage.getItem(STORAGE_KEYS.teamId));
+  if (Number.isFinite(savedTeamId) && TEAM_BY_ID.has(savedTeamId)) {
+    return savedTeamId;
+  }
+
+  return TEAM_OPTIONS[0].id;
+}
+
+function resolveTeamIdFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const rawValue = params.get(URL_PARAMS.team);
+    if (!rawValue) {
+      return null;
+    }
+
+    const normalizedSlug = normalizeTeamSlug(rawValue);
+    if (TEAM_BY_SLUG.has(normalizedSlug)) {
+      return TEAM_BY_SLUG.get(normalizedSlug).id;
+    }
+
+    const normalizedAbbr = rawValue.trim().toLowerCase();
+    if (TEAM_BY_ABBR.has(normalizedAbbr)) {
+      return TEAM_BY_ABBR.get(normalizedAbbr).id;
+    }
+
+    const numericId = Number(rawValue);
+    if (Number.isFinite(numericId) && TEAM_BY_ID.has(numericId)) {
+      return numericId;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function syncTeamQueryParam(teamId) {
+  const team = TEAM_BY_ID.get(Number(teamId));
+  if (!team) {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(URL_PARAMS.team, buildTeamSlug(team));
+  window.history.replaceState({}, "", url);
+}
+
+function buildTeamSlug(team) {
+  return normalizeTeamSlug(team?.name || "");
+}
+
+function normalizeTeamSlug(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function startWorker() {
@@ -866,7 +943,7 @@ function resolvePitchingTeam(liveState, fallbackTeam = null) {
 function renderPregame(nextState) {
   setStateLayout("pregame");
   setSelectedLiveTeamSide("");
-  setMobileLiveWatermark("");
+  setMobileLiveWatermark(liveLogoUrl(nextState?.team || null));
   const selectedTeam = nextState.team?.name || "Selected Team";
   const game = nextState.nextGame;
   const previousGame = nextState.previousGame;
@@ -889,8 +966,8 @@ function renderPregame(nextState) {
   elements.statusLabel.textContent = gameStatus;
   setSideWatermark(elements.awaySide, awayLogo, "left");
   setSideWatermark(elements.homeSide, homeLogo, "right");
-  setImage(elements.awayLogo, "", `${awayName} logo`);
-  setImage(elements.homeLogo, "", `${homeName} logo`);
+  setImage(elements.awayLogo, "", `${awayName} logo`, { preserveExisting: false });
+  setImage(elements.homeLogo, "", `${homeName} logo`, { preserveExisting: false });
   elements.awayLogo.classList.remove("logo-edge-left", "logo-edge-right");
   elements.homeLogo.classList.remove("logo-edge-left", "logo-edge-right");
   setRecord(elements.awayRecord, null);
@@ -1032,7 +1109,7 @@ function renderLive(nextState) {
 function renderFinal(nextState) {
   setStateLayout("final");
   setSelectedLiveTeamSide("");
-  setMobileLiveWatermark("");
+  setMobileLiveWatermark(liveLogoUrl(nextState?.team || null));
   const final = nextState.final;
   const nextGame = nextState.nextGame;
   const selectedTeam = nextState.team?.name || "Selected Team";
@@ -1058,8 +1135,8 @@ function renderFinal(nextState) {
   elements.statusLabel.textContent = nextGame ? nextGameStatus : "Game Complete";
   setSideWatermark(elements.awaySide, awayLogo, "left");
   setSideWatermark(elements.homeSide, homeLogo, "right");
-  setImage(elements.awayLogo, "", `${awayName} logo`);
-  setImage(elements.homeLogo, "", `${homeName} logo`);
+  setImage(elements.awayLogo, "", `${awayName} logo`, { preserveExisting: false });
+  setImage(elements.homeLogo, "", `${homeName} logo`, { preserveExisting: false });
   elements.awayLogo.classList.remove("logo-edge-left", "logo-edge-right");
   elements.homeLogo.classList.remove("logo-edge-left", "logo-edge-right");
   setRecord(elements.awayRecord, null);
@@ -1306,6 +1383,7 @@ function setImage(element, src, alt, options = {}) {
 
   if (
     !src &&
+    options.preserveExisting !== false &&
     !options.usePlayerFallback &&
     element.dataset.sourceSrc &&
     element.classList.contains("has-image") &&
@@ -1317,6 +1395,7 @@ function setImage(element, src, alt, options = {}) {
 
   if (
     src &&
+    options.preserveExisting !== false &&
     !options.usePlayerFallback &&
     element.dataset.sourceSrc === src &&
     element.classList.contains("has-image") &&
