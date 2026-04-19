@@ -157,7 +157,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-18-0020",
+    appVersion: "debug-2026-04-19-0008",
   },
 };
 
@@ -170,6 +170,7 @@ const portraitImageCache = new Map();
 const elements = {
   awaySide: document.querySelector(".score-side.away"),
   homeSide: document.querySelector(".score-side.home"),
+  scoreStrip: document.querySelector(".score-strip"),
   headerTeamLogo: document.querySelector("#header-team-logo"),
   teamTitle: document.querySelector("#team-title"),
   teamSelect: document.querySelector("#team-select"),
@@ -864,6 +865,8 @@ function resolvePitchingTeam(liveState, fallbackTeam = null) {
 // probable starters instead of the active batter / pitcher.
 function renderPregame(nextState) {
   setStateLayout("pregame");
+  setSelectedLiveTeamSide("");
+  setMobileLiveWatermark("");
   const selectedTeam = nextState.team?.name || "Selected Team";
   const game = nextState.nextGame;
   const previousGame = nextState.previousGame;
@@ -948,13 +951,27 @@ function renderPregame(nextState) {
 function renderLive(nextState) {
   setStateLayout("live");
   const live = nextState.live;
+  const selectedTeamId = Number(nextState.team?.id);
+  const selectedSide = Number.isFinite(selectedTeamId) && live?.away?.id === selectedTeamId
+    ? "away"
+    : Number.isFinite(selectedTeamId) && live?.home?.id === selectedTeamId
+      ? "home"
+      : "";
+  const selectedWatermarkLogo = selectedSide === "away"
+    ? liveLogoUrl(live?.away)
+    : selectedSide === "home"
+      ? liveLogoUrl(live?.home)
+      : liveLogoUrl(nextState?.team || null);
+
+  setSelectedLiveTeamSide(selectedSide);
+  setMobileLiveWatermark(selectedWatermarkLogo);
   elements.leftCardLabel.textContent = "Current Batter";
   elements.rightCardLabel.textContent = "Current Pitcher";
   elements.statusLabel.textContent = live?.status || "In Progress";
   setSideWatermark(elements.awaySide, liveLogoUrl(live?.away), "left");
   setSideWatermark(elements.homeSide, liveLogoUrl(live?.home), "right");
-  setImage(elements.awayLogo, "", `${live?.away?.name || "Away"} logo`);
-  setImage(elements.homeLogo, "", `${live?.home?.name || "Home"} logo`);
+  setImage(elements.awayLogo, liveLogoUrl(live?.away), `${live?.away?.name || "Away"} logo`);
+  setImage(elements.homeLogo, liveLogoUrl(live?.home), `${live?.home?.name || "Home"} logo`);
   elements.awayLogo.classList.remove("logo-edge-left", "logo-edge-right");
   elements.homeLogo.classList.remove("logo-edge-left", "logo-edge-right");
   setRecord(elements.awayRecord, null);
@@ -1014,6 +1031,8 @@ function renderLive(nextState) {
 // Final mode bridges the completed game and the next scheduled matchup.
 function renderFinal(nextState) {
   setStateLayout("final");
+  setSelectedLiveTeamSide("");
+  setMobileLiveWatermark("");
   const final = nextState.final;
   const nextGame = nextState.nextGame;
   const selectedTeam = nextState.team?.name || "Selected Team";
@@ -2401,6 +2420,9 @@ function setFooterSlots(slot1, slot2, slot3) {
 
 function setStateLayout(mode) {
   const isLive = mode === "live";
+  if (elements.scoreStrip) {
+    elements.scoreStrip.classList.toggle("is-live-layout", isLive);
+  }
   if (elements.heroFooter) {
     elements.heroFooter.hidden = true;
     elements.heroFooter.classList.add("is-hidden");
@@ -2420,6 +2442,31 @@ function setStateLayout(mode) {
     elements.homeSide.classList.add("score-side-compact");
     elements.homeSide.classList.toggle("score-side-live", isLive);
   }
+}
+
+function setSelectedLiveTeamSide(side = "") {
+  if (elements.awaySide) {
+    elements.awaySide.classList.toggle("is-selected-team", side === "away");
+  }
+  if (elements.homeSide) {
+    elements.homeSide.classList.toggle("is-selected-team", side === "home");
+  }
+}
+
+function setMobileLiveWatermark(src = "") {
+  if (!elements.scoreStrip) {
+    return;
+  }
+
+  elements.scoreStrip.classList.remove("has-mobile-live-watermark");
+  elements.scoreStrip.style.removeProperty("--mobile-live-watermark");
+
+  if (!src) {
+    return;
+  }
+
+  elements.scoreStrip.style.setProperty("--mobile-live-watermark", `url("${src}")`);
+  elements.scoreStrip.classList.add("has-mobile-live-watermark");
 }
 
 function formatBoxSummary(team) {
