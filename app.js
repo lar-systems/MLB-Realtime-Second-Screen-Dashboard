@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
 
 const URL_PARAMS = {
   team: "t",
+  kiosk: "kiosk",
 };
 
 const TEAM_OPTIONS = [
@@ -152,6 +153,7 @@ const CELEBRATION_CONTEXT_TIERS = new Map([
 const state = {
   worker: null,
   countdownTimer: null,
+  lastRefreshRequestAt: 0,
   current: null,
   renderCache: {
     linescoreKey: "",
@@ -172,7 +174,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-19-0018",
+    appVersion: "debug-2026-04-25-0003",
   },
 };
 
@@ -188,10 +190,12 @@ const elements = {
   scoreStrip: document.querySelector(".score-strip"),
   headerTeamLogo: document.querySelector("#header-team-logo"),
   teamTitle: document.querySelector("#team-title"),
+  controls: document.querySelector(".controls"),
   teamSelect: document.querySelector("#team-select"),
   cycleModeButton: document.querySelector("#cycle-mode-button"),
   cycleActionButton: document.querySelector("#cycle-action-button"),
   debugToggleButton: document.querySelector("#debug-toggle-button"),
+  dashboardActions: document.querySelector(".dashboard-actions"),
   debugPanel: document.querySelector("#debug-panel"),
   statusBanner: document.querySelector("#status-banner"),
   modeLabel: document.querySelector("#mode-label"),
@@ -278,6 +282,7 @@ function init() {
   populateTeamSelect();
   applyTeamTheme(Number(elements.teamSelect.value));
   syncCachedStateVersion();
+  applyKioskMode();
   bindEvents();
   restoreDebugVisibility();
   renderStartupState();
@@ -345,6 +350,20 @@ function bindEvents() {
 
     handleTeamSelection(teamId);
   });
+
+  window.addEventListener("focus", () => {
+    requestWorkerRefresh("Window focused", 30000);
+  });
+
+  window.addEventListener("online", () => {
+    requestWorkerRefresh("Network restored", 10000);
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      requestWorkerRefresh("Tab became visible", 30000);
+    }
+  });
 }
 
 function renderStartupState() {
@@ -358,6 +377,11 @@ function renderStartupState() {
 }
 
 function restoreDebugVisibility() {
+  if (isKioskMode()) {
+    setDebugVisibility(false, { persist: false });
+    return;
+  }
+
   const raw = localStorage.getItem(STORAGE_KEYS.debugVisible);
   const isVisible = raw === null ? false : raw === "true";
   setDebugVisibility(isVisible, { persist: false });
@@ -397,8 +421,7 @@ function resolveInitialTeamId() {
 
 function resolveTeamIdFromUrl() {
   try {
-    const params = new URLSearchParams(window.location.search);
-    const rawValue = params.get(URL_PARAMS.team);
+    const rawValue = getUrlParamValueCaseInsensitive(URL_PARAMS.team);
     if (!rawValue) {
       return null;
     }
@@ -422,6 +445,44 @@ function resolveTeamIdFromUrl() {
   }
 
   return null;
+}
+
+function getUrlParamValueCaseInsensitive(paramName) {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const normalizedName = String(paramName || "").trim().toLowerCase();
+
+    for (const [key, value] of params.entries()) {
+      if (String(key || "").trim().toLowerCase() === normalizedName) {
+        return value;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function isKioskMode() {
+  const rawValue = getUrlParamValueCaseInsensitive(URL_PARAMS.kiosk);
+  return String(rawValue || "").trim().toLowerCase() === "true";
+}
+
+function applyKioskMode() {
+  const kioskMode = isKioskMode();
+
+  if (elements.controls) {
+    elements.controls.hidden = kioskMode;
+  }
+
+  if (elements.dashboardActions) {
+    elements.dashboardActions.hidden = kioskMode;
+  }
+
+  if (kioskMode) {
+    setDebugVisibility(false, { persist: false });
+  }
 }
 
 function syncTeamQueryParam(teamId) {
@@ -460,6 +521,21 @@ function startWorker() {
     teamId: Number(elements.teamSelect.value),
     useMockData: false,
   });
+}
+
+function requestWorkerRefresh(reason = "Refresh requested", minIntervalMs = 30000) {
+  if (!state.worker) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - state.lastRefreshRequestAt < minIntervalMs) {
+    return;
+  }
+
+  state.lastRefreshRequestAt = now;
+  state.debug.workerStatus = `refresh requested (${reason})`;
+  state.worker.postMessage({ type: "REFRESH_NOW" });
 }
 
 function handleWorkerMessage(event) {
@@ -2047,6 +2123,10 @@ function updateCountdown(nextState) {
     return;
   }
 
+  if (countdownTargetMs && countdownTargetMs - Date.now() <= 2 * 60 * 1000) {
+    requestWorkerRefresh("Countdown near rollover", 45000);
+  }
+
   const delta = Math.max(0, countdownTargetMs - Date.now());
   const totalSeconds = Math.floor(delta / 1000);
   elements.countdown.innerHTML = renderLaunchCountdownMarkup(totalSeconds);
@@ -2750,10 +2830,19 @@ function setSideWatermark(element, src, side = "") {
     return;
   }
 
+  const strip = element.closest(".score-strip");
+  const stripKey = side === "left" ? "away" : side === "right" ? "home" : "";
+
   element.classList.remove("has-watermark", "watermark-left", "watermark-right");
   element.style.removeProperty("--side-logo");
   element.style.removeProperty("--side-watermark-position");
   element.style.removeProperty("--side-watermark-opacity");
+
+  if (stripKey && strip) {
+    strip.style.removeProperty(`--strip-${stripKey}-logo`);
+    strip.style.removeProperty(`--strip-${stripKey}-watermark-position`);
+    strip.style.removeProperty(`--strip-${stripKey}-watermark-opacity`);
+  }
 
   if (!src) {
     return;
@@ -2761,9 +2850,18 @@ function setSideWatermark(element, src, side = "") {
 
   element.style.setProperty("--side-logo", `url("${src}")`);
   const teamId = extractTeamIdFromLogoUrl(src);
-  element.style.setProperty("--side-watermark-position", buildWatermarkPosition(teamId, side));
-  element.style.setProperty("--side-watermark-opacity", String(buildWatermarkOpacity(teamId)));
+  const watermarkPosition = buildWatermarkPosition(teamId, side);
+  const stripWatermarkPosition = buildStripWatermarkPosition(teamId, side);
+  const watermarkOpacity = String(buildWatermarkOpacity(teamId));
+  element.style.setProperty("--side-watermark-position", watermarkPosition);
+  element.style.setProperty("--side-watermark-opacity", watermarkOpacity);
   element.classList.add("has-watermark");
+
+  if (stripKey && strip) {
+    strip.style.setProperty(`--strip-${stripKey}-logo`, `url("${src}")`);
+    strip.style.setProperty(`--strip-${stripKey}-watermark-position`, stripWatermarkPosition);
+    strip.style.setProperty(`--strip-${stripKey}-watermark-opacity`, watermarkOpacity);
+  }
 
   if (side === "left" || side === "right") {
     element.classList.add(`watermark-${side}`);
@@ -2819,6 +2917,21 @@ function buildWatermarkPosition(teamId, side) {
   }
 
   return defaultPosition;
+}
+
+function buildStripWatermarkPosition(teamId, side) {
+  const profile = WATERMARK_PROFILES.get(teamId);
+  const inset = profile?.inset ?? 56;
+
+  if (side === "left") {
+    return `${inset}px center`;
+  }
+
+  if (side === "right") {
+    return `calc(100% - ${inset}px) center`;
+  }
+
+  return "center center";
 }
 
 function buildWatermarkOpacity(teamId) {

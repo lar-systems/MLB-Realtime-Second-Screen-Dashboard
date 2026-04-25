@@ -87,28 +87,21 @@ async function pollNow() {
     const message = error instanceof Error ? error.message : "Unknown polling error";
     self.postMessage({ type: "ERROR", message });
 
-    if (!workerState.mockModeForced) {
-      try {
-        const fallbackState = buildWorkerMockState(workerState.teamId, message);
-        workerState.lastKnownState = fallbackState;
-        self.postMessage({ type: "STATE", payload: fallbackState });
-        scheduleNextPoll(resolvePollDelay(fallbackState));
-        return;
-      } catch {
-        workerState.useMockData = false;
-      }
-    }
-
     if (workerState.lastKnownState) {
       const staleState = {
         ...workerState.lastKnownState,
         meta: {
           ...workerState.lastKnownState.meta,
           lastError: message,
-          sourceStatus: "Showing last known state while the worker retries.",
+          sourceStatus: "Showing last known MLB state while the worker retries.",
         },
       };
       self.postMessage({ type: "STATE", payload: staleState });
+    } else {
+      self.postMessage({
+        type: "STATE",
+        payload: buildUnavailableState(workerState.teamId, message),
+      });
     }
 
     scheduleNextPoll(POLL_INTERVALS.error);
@@ -135,7 +128,7 @@ async function fetchDashboardState() {
 
   const [relevantGames, leagueGames] = await Promise.all([
     fetchRelevantSchedule(workerState.teamId),
-    fetchLeagueScoreboardGames(),
+    fetchLeagueScoreboardGames().catch(() => []),
   ]);
   const activeGames = buildActiveGames(leagueGames);
   const recentGames = buildRecentGames(leagueGames);
@@ -148,7 +141,7 @@ async function fetchDashboardState() {
   const upcomingSchedule = buildUpcomingSchedule(relevantGames, scheduleAnchorGame);
 
   if (liveGame) {
-    const liveFeed = await fetchLiveFeed(liveGame.gamePk, { allowNotFound: true });
+    const liveFeed = await fetchLiveFeed(liveGame.gamePk, { allowNotFound: true }).catch(() => null);
     if (liveFeed) {
       return withScoreboardGames(normalizeLiveState(liveFeed), activeGames, recentGames);
     }
@@ -168,7 +161,7 @@ async function fetchDashboardState() {
   }
 
   if (recentFinal) {
-    const liveFeed = await fetchLiveFeed(recentFinal.gamePk, { allowNotFound: true });
+    const liveFeed = await fetchLiveFeed(recentFinal.gamePk, { allowNotFound: true }).catch(() => null);
     if (liveFeed) {
       return withScoreboardGames(normalizeFinalState(liveFeed, upcomingGame), activeGames, recentGames);
     }
@@ -1752,6 +1745,18 @@ function withScoreboardGames(nextState, activeGames, recentGames) {
     ...nextState,
     activeGames: Array.isArray(activeGames) ? activeGames : [],
     recentGames: Array.isArray(recentGames) ? recentGames : [],
+  };
+}
+
+function buildUnavailableState(teamId, errorMessage) {
+  const unavailableState = buildNoGameState(teamId);
+  return {
+    ...unavailableState,
+    meta: {
+      sourceStatus: "Unable to refresh MLB schedule data right now.",
+      lastSuccessfulUpdate: unavailableState.meta?.lastSuccessfulUpdate || Date.now(),
+      lastError: errorMessage || null,
+    },
   };
 }
 

@@ -231,9 +231,17 @@ select {
   text-align: right;
 }
 
+.mode-label,
+.updated-clock,
+.status-label {
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .updated-clock {
   margin: 0;
   justify-self: center;
+  text-align: center;
   color: var(--muted);
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 1rem;
@@ -799,12 +807,47 @@ select {
 }
 
 .score-strip {
+  --score-strip-gap: 16px;
+  --center-status-basis: 250px;
+  --score-strip-watermark-overhang: clamp(112px, 13vw, 200px);
   align-items: center;
   margin: 24px 0 0;
   padding: 18px 22px;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   border-radius: 4px;
   background: var(--panel-strong);
   border: 1px solid var(--line);
+}
+
+.score-strip::before,
+.score-strip::after {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-repeat: no-repeat;
+  background-size: auto 100%;
+  filter: grayscale(1);
+}
+
+.score-strip::before {
+  left: 0;
+  background-image: var(--strip-away-logo, none);
+  background-position: var(--strip-away-watermark-position, left center);
+  opacity: var(--strip-away-watermark-opacity, 0);
+}
+
+.score-strip::after {
+  right: 0;
+  background-image: var(--strip-home-logo, none);
+  background-position: var(--strip-home-watermark-position, right center);
+  opacity: var(--strip-home-watermark-opacity, 0);
 }
 
 .score-side,
@@ -823,6 +866,7 @@ select {
   position: relative;
   overflow: hidden;
   isolation: isolate;
+  z-index: 1;
 }
 
 .score-side::before {
@@ -948,6 +992,7 @@ select {
 
 .live-side-card {
   width: min(100%, 390px);
+  container-type: inline-size;
   position: relative;
   display: grid;
   grid-template-columns: 104px minmax(0, 1fr);
@@ -960,11 +1005,36 @@ select {
   min-height: 150px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: rgba(8, 16, 31, 0.22);
-  -webkit-backdrop-filter: blur(14px) saturate(125%);
-  backdrop-filter: blur(14px) saturate(125%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background:
+    linear-gradient(180deg, rgba(12, 23, 41, 0.82), rgba(8, 16, 31, 0.78)),
+    rgba(8, 16, 31, 0.76);
+  -webkit-backdrop-filter: blur(18px) saturate(132%);
+  backdrop-filter: blur(18px) saturate(132%);
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   text-align: left;
+}
+
+@container (max-width: 340px) {
+  .live-side-card {
+    grid-template-areas:
+      "photo body"
+      "stats stats";
+    align-items: start;
+  }
+
+  .live-side-player > div {
+    gap: 4px;
+  }
+
+  .live-side-stats {
+    margin-top: 2px;
+  }
+
+  .player-stat-metrics-compact {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .live-side-card.has-batting-order::after,
@@ -1100,6 +1170,8 @@ select {
   gap: 8px;
   text-align: center;
   padding: 10px 8px;
+  position: relative;
+  z-index: 2;
 }
 
 .center-state {
@@ -2274,30 +2346,32 @@ select {
   }
 
   .hero-meta {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "mode clock"
-      "status status";
-    gap: 10px 14px;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas: "mode clock status";
+    gap: 10px 12px;
   }
 
   .mode-label {
     grid-area: mode;
+    justify-self: start;
   }
 
   .updated-clock {
     grid-area: clock;
-    justify-self: end;
+    justify-self: center;
     font-size: 0.9rem;
   }
 
   .status-label {
     grid-area: status;
-    justify-self: start;
-    text-align: left;
+    justify-self: end;
+    text-align: right;
   }
 
   .score-strip {
+    --score-strip-gap: 14px;
+    --center-status-basis: 210px;
+    --score-strip-watermark-overhang: clamp(220px, 28vw, 360px);
     gap: 14px;
     padding: 14px 16px;
   }
@@ -2333,7 +2407,11 @@ select {
   .live-side-card {
     width: min(100%, 320px);
     grid-template-columns: 88px minmax(0, 1fr);
+    grid-template-areas:
+      "photo body"
+      "stats stats";
     min-height: 134px;
+    align-items: start;
   }
 
   .details-grid {
@@ -2352,6 +2430,26 @@ select {
 
   .active-game-card {
     scroll-snap-align: start;
+  }
+}
+
+@media (min-width: 721px) {
+  .score-strip {
+    --score-strip-watermark-width: calc(
+      ((100% - var(--center-status-basis) - (var(--score-strip-gap) * 2)) / 2) +
+      var(--score-strip-watermark-overhang)
+    );
+  }
+
+  .score-strip::before,
+  .score-strip::after {
+    width: var(--score-strip-watermark-width);
+  }
+
+  .score-side::before {
+    content: none;
+    background-image: none;
+    opacity: 0;
   }
 }
 
@@ -2414,6 +2512,8 @@ select {
   }
 
   .score-strip {
+    --score-strip-gap: 12px;
+    --center-status-basis: 0px;
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
@@ -2674,25 +2774,38 @@ select {
   }
 
   .score-strip.has-mobile-live-watermark::before {
+    content: none;
+    background-image: none;
+    opacity: 0;
+  }
+
+  .score-strip.has-mobile-live-watermark .center-status::before {
     content: "";
     position: absolute;
-    inset: 12px;
-    border-radius: 4px;
+    inset: -10px -16px;
     background-image: var(--mobile-live-watermark, none);
     background-repeat: no-repeat;
-    background-position: center;
-    background-size: auto 80%;
-    filter: grayscale(1);
-    opacity: 0;
+    background-position: center 48%;
+    background-size: clamp(180px, 62vw, 240px) auto;
+    filter: grayscale(1) brightness(1.85) contrast(0.72);
+    mix-blend-mode: normal;
+    opacity: 0.11;
     pointer-events: none;
     z-index: 0;
   }
 
-  .score-strip.has-mobile-live-watermark::before {
-    opacity: 0.06;
+  .score-strip.has-mobile-live-watermark::after {
+    content: none;
+    background-image: none;
+    opacity: 0;
   }
 
   .score-strip.has-mobile-live-watermark > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .score-strip.has-mobile-live-watermark .center-status > * {
     position: relative;
     z-index: 1;
   }
@@ -3122,6 +3235,8 @@ select {
   }
 
   .score-strip {
+    --score-strip-gap: 12px;
+    --center-status-basis: 180px;
     gap: 12px;
     padding: 12px 14px;
     margin-top: 16px;
