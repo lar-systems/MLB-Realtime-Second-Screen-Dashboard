@@ -154,6 +154,7 @@ const state = {
   worker: null,
   countdownTimer: null,
   lastRefreshRequestAt: 0,
+  pageScrollbarTimer: null,
   current: null,
   renderCache: {
     linescoreKey: "",
@@ -174,7 +175,7 @@ const state = {
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-25-0003",
+    appVersion: "debug-2026-04-27-0004",
   },
 };
 
@@ -316,6 +317,8 @@ function handleTeamSelection(teamId) {
 }
 
 function bindEvents() {
+  bindPageScrollbarActivityEvents();
+
   elements.teamSelect.addEventListener("change", () => {
     handleTeamSelection(Number(elements.teamSelect.value));
   });
@@ -364,6 +367,45 @@ function bindEvents() {
       requestWorkerRefresh("Tab became visible", 30000);
     }
   });
+}
+
+function bindPageScrollbarActivityEvents() {
+  const revealScrollbar = () => {
+    pulsePageScrollbarVisibility();
+  };
+
+  window.addEventListener("scroll", revealScrollbar, { passive: true });
+  window.addEventListener("wheel", revealScrollbar, { passive: true });
+  window.addEventListener("touchmove", revealScrollbar, { passive: true });
+  window.addEventListener("keydown", (event) => {
+    if (!isScrollRevealKey(event)) {
+      return;
+    }
+
+    revealScrollbar();
+  });
+}
+
+function isScrollRevealKey(event) {
+  const key = String(event?.key || "");
+  return [
+    "ArrowUp",
+    "ArrowDown",
+    "PageUp",
+    "PageDown",
+    "Home",
+    "End",
+    " ",
+    "Spacebar",
+  ].includes(key);
+}
+
+function pulsePageScrollbarVisibility(durationMs = 1100) {
+  document.documentElement.classList.add("is-page-scrolling");
+  window.clearTimeout(state.pageScrollbarTimer);
+  state.pageScrollbarTimer = window.setTimeout(() => {
+    document.documentElement.classList.remove("is-page-scrolling");
+  }, durationMs);
 }
 
 function renderStartupState() {
