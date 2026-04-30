@@ -345,6 +345,7 @@ function normalizeLiveState(feed) {
       batter,
       pitcher,
       celebration: buildLiveCelebration(currentPlay, batter, pitcher, {
+        status: gameData?.status?.detailedState || "In Progress",
         inning: linescore?.currentInning ?? linescore?.scheduledInnings ?? 0,
         inningHalf: linescore?.inningHalf || null,
         awayScore: linescore?.teams?.away?.runs ?? 0,
@@ -386,7 +387,7 @@ async function normalizeFinalState(feed, upcomingGame) {
       awayScore,
       homeScore,
       summary: buildFinalSummary(gameData, liveData),
-      celebration: buildFinalWinCelebration(gameData, team, awayScore, homeScore),
+      celebration: buildFinalGameCelebration(gameData, team, awayScore, homeScore),
     },
     meta: {
       sourceStatus: `Final game state from MLB feed. ${gameData?.status?.detailedState || "Final"}`,
@@ -438,6 +439,7 @@ function normalizePartialLiveState(game, resources) {
       batter,
       pitcher,
       celebration: buildLiveCelebration(currentPlay, batter, pitcher, {
+        status: game?.status?.detailedState || "In Progress",
         inning: linescore?.currentInning ?? 0,
         inningHalf: linescore?.inningHalf || null,
         awayScore: game?.teams?.away?.score ?? linescore?.teams?.away?.runs ?? 0,
@@ -529,7 +531,7 @@ async function normalizeScheduleFinalFallback(game, upcomingGame) {
       awayScore,
       homeScore,
       summary: `${game?.status?.detailedState || "Final"}. Feed unavailable, showing schedule-level summary.`,
-      celebration: buildFinalWinCelebration(game, team, awayScore, homeScore),
+      celebration: buildFinalGameCelebration(game, team, awayScore, homeScore),
     },
     meta: {
       sourceStatus: "Final schedule fallback active because MLB feed/live returned 404.",
@@ -942,7 +944,7 @@ function extractGamePitchingStats(stats) {
 }
 
 function buildLiveCelebration(currentPlay, batter, pitcher, liveContext = null) {
-  if (!currentPlay?.result) {
+  if (!currentPlay?.result && !Array.isArray(currentPlay?.playEvents)) {
     return null;
   }
 
@@ -963,6 +965,24 @@ function buildLiveCelebration(currentPlay, batter, pitcher, liveContext = null) 
   const rbi = Number(currentPlay?.result?.rbi || 0);
   const runsScored = countRunsScored(currentPlay);
   const impactContext = buildScoringImpactContext(liveContext, runsScored);
+  const challengeCelebration = buildChallengeCelebration(
+    currentPlay,
+    celebrationId,
+    eventType,
+    batter,
+    pitcher
+  );
+  if (challengeCelebration) {
+    return challengeCelebration;
+  }
+
+  const liveStatusCelebration = buildLiveStatusCelebration(
+    liveContext?.status,
+    celebrationId
+  );
+  if (liveStatusCelebration) {
+    return liveStatusCelebration;
+  }
 
   if (eventType === "home_run" && batter?.name) {
     const isGrandSlam = rbi >= 4;
@@ -1164,6 +1184,16 @@ function buildLiveCelebration(currentPlay, batter, pitcher, liveContext = null) 
     });
   }
 
+  const playEventCelebration = buildSupplementalPlayEventCelebration(
+    currentPlay,
+    celebrationId,
+    batter,
+    pitcher
+  );
+  if (playEventCelebration) {
+    return playEventCelebration;
+  }
+
   return null;
 }
 
@@ -1229,6 +1259,165 @@ function isPickoffCelebration(eventType) {
 
 function isStrikeoutCelebration(eventType) {
   return eventType.includes("strikeout") || eventType.includes("strike_out");
+}
+
+function buildChallengeCelebration(currentPlay, celebrationId, eventType, batter, pitcher) {
+  const description = String(currentPlay?.result?.description || "").trim();
+  if (!description || !description.toLowerCase().includes("challenged")) {
+    return null;
+  }
+
+  const challengeType = extractChallengeType(description);
+  const isAbsChallenge = challengeType.includes("pitch result");
+  const beneficiaryRole = resolveChallengeBeneficiaryRole(eventType);
+
+  return buildCelebrationPayload({
+    id: `${celebrationId}:${isAbsChallenge ? "abs_challenge" : "play_challenge"}`,
+    eventKey: isAbsChallenge ? "abs_challenge" : "play_challenge",
+    label: isAbsChallenge ? "ABS CHALLENGE" : "PLAY CHALLENGE",
+    detail: buildChallengeCelebrationDetail(challengeType, extractChallengeOutcome(description), eventType),
+    actor: extractChallengeActor(description) || (isAbsChallenge ? batter?.name : pitcher?.name) || "Replay Review",
+    tone: beneficiaryRole === "pitcher" ? "pitcher" : "batter",
+    beneficiaryRole,
+    impactContext: null,
+  });
+}
+
+function buildLiveStatusCelebration(status, celebrationId) {
+  const normalized = normalizeCelebrationEventType(status);
+  if (!normalized || (!normalized.includes("challenge") && !normalized.includes("review"))) {
+    return null;
+  }
+
+  return buildCelebrationPayload({
+    id: `${celebrationId}:review_pending`,
+    eventKey: "review_pending",
+    label: "MANAGER CHALLENGE",
+    detail: "replay review is in progress",
+    actor: "Replay Review",
+    tone: "pitcher",
+    beneficiaryRole: "pitcher",
+    impactContext: null,
+  });
+}
+
+function buildSupplementalPlayEventCelebration(currentPlay, celebrationId, batter, pitcher) {
+  const playEvents = Array.isArray(currentPlay?.playEvents) ? currentPlay.playEvents : [];
+  for (let index = playEvents.length - 1; index >= 0; index -= 1) {
+    const config = classifySupplementalPlayEvent(playEvents[index], batter, pitcher);
+    if (!config) {
+      continue;
+    }
+
+    const playEventId = String(playEvents[index]?.playId || index);
+    return buildCelebrationPayload({
+      id: `${celebrationId}:${config.eventKey}:${playEventId}`,
+      eventKey: config.eventKey,
+      label: config.label,
+      detail: config.detail,
+      actor: config.actor,
+      tone: config.tone,
+      beneficiaryRole: config.beneficiaryRole,
+      impactContext: null,
+    });
+  }
+
+  return null;
+}
+
+function classifySupplementalPlayEvent(playEvent, batter, pitcher) {
+  const details = playEvent?.details || {};
+  const description = String(details.description || "").trim();
+  const normalizedDescription = description.toLowerCase();
+  const eventType = normalizeCelebrationEventType(
+    details.eventType ||
+    details.event ||
+    description ||
+    details.code
+  );
+
+  if (eventType === "batter_timeout" || normalizedDescription.includes("batter timeout")) {
+    return {
+      eventKey: "batter_timeout",
+      label: "BATTER TIMEOUT",
+      detail: "calls time at the plate",
+      actor: batter?.name || "Batter",
+      tone: "batter",
+      beneficiaryRole: "batter",
+    };
+  }
+
+  if (eventType === "pitcher_timeout" || normalizedDescription.includes("pitcher timeout")) {
+    return {
+      eventKey: "pitcher_timeout",
+      label: "PITCHER TIMEOUT",
+      detail: "calls time on the mound",
+      actor: pitcher?.name || "Pitcher",
+      tone: "pitcher",
+      beneficiaryRole: "pitcher",
+    };
+  }
+
+  if (eventType === "mound_visit" || normalizedDescription.includes("mound visit")) {
+    return {
+      eventKey: "mound_visit",
+      label: "MOUND VISIT",
+      detail: "gets a quick visit on the mound",
+      actor: pitcher?.name || "Pitcher",
+      tone: "pitcher",
+      beneficiaryRole: "pitcher",
+    };
+  }
+
+  if (
+    eventType === "pitcher_step_off" ||
+    String(details.code || "").toUpperCase() === "PSO" ||
+    normalizedDescription.includes("pitcher step off")
+  ) {
+    return {
+      eventKey: "pitcher_step_off",
+      label: "STEP OFF",
+      detail: "steps off to reset",
+      actor: pitcher?.name || "Pitcher",
+      tone: "pitcher",
+      beneficiaryRole: "pitcher",
+    };
+  }
+
+  if (normalizedDescription.includes("automatic ball")) {
+    return {
+      eventKey: "automatic_ball",
+      label: "AUTOMATIC BALL",
+      detail: buildAutomaticBallCelebrationDetail(description),
+      actor: pitcher?.name || "Pitcher",
+      tone: "batter",
+      beneficiaryRole: "batter",
+    };
+  }
+
+  if (normalizedDescription.includes("automatic strike")) {
+    return {
+      eventKey: "automatic_strike",
+      label: "AUTOMATIC STRIKE",
+      detail: buildAutomaticStrikeCelebrationDetail(description),
+      actor: batter?.name || "Batter",
+      tone: "pitcher",
+      beneficiaryRole: "pitcher",
+    };
+  }
+
+  if (normalizedDescription.includes("disengagement violation") || eventType === "forced_balk") {
+    return {
+      eventKey: "disengagement_violation",
+      label: "DISENGAGEMENT",
+      detail: buildDisengagementCelebrationDetail(description),
+      actor: pitcher?.name || "Pitcher",
+      tone: "pitcher",
+      beneficiaryRole: "pitcher",
+    };
+  }
+
+  return null;
 }
 
 function countRunsScored(currentPlay) {
@@ -1461,6 +1650,29 @@ function buildDoublePlayCelebrationDetail(eventType) {
   return "turns two";
 }
 
+function buildChallengeCelebrationDetail(challengeType, outcome, eventType) {
+  const reviewSubject = challengeType.includes("pitch result")
+    ? "pitch review"
+    : challengeType
+      ? `${challengeType} review`
+      : "replay review";
+  const finalCall = describeChallengeFinalCall(eventType);
+
+  if (outcome === "overturned") {
+    return finalCall ? `${reviewSubject} overturns it to ${finalCall}` : `${reviewSubject} overturns the call`;
+  }
+
+  if (outcome === "confirmed") {
+    return finalCall ? `${reviewSubject} confirms ${finalCall}` : `${reviewSubject} confirms the call`;
+  }
+
+  if (outcome === "upheld") {
+    return finalCall ? `${reviewSubject} upholds ${finalCall}` : `${reviewSubject} upholds the call`;
+  }
+
+  return `${reviewSubject} is underway`;
+}
+
 function buildCaughtStealingCelebrationDetail(eventType) {
   const baseLabel = baseLabelFromEventType(eventType);
   return baseLabel ? `cuts down the runner at ${baseLabel}` : "cuts down the runner";
@@ -1488,11 +1700,99 @@ function buildStrikeoutCelebrationDetail(batterName, strikeoutCount) {
   return "blows it by the batter";
 }
 
+function buildAutomaticBallCelebrationDetail(description) {
+  const normalized = String(description || "").toLowerCase();
+  if (normalized.includes("pitch timer violation")) {
+    return "is charged with the automatic ball";
+  }
+  if (normalized.includes("intentional")) {
+    return "concedes the automatic ball";
+  }
+  return "is hit with an automatic ball";
+}
+
+function buildAutomaticStrikeCelebrationDetail(description) {
+  const normalized = String(description || "").toLowerCase();
+  if (normalized.includes("pitch timer violation")) {
+    return "is charged with the automatic strike";
+  }
+  return "takes the automatic strike";
+}
+
+function buildDisengagementCelebrationDetail(description) {
+  const normalized = String(description || "").toLowerCase();
+  if (normalized.includes("advances to")) {
+    return "commits the disengagement violation as the runners move up";
+  }
+  return "is tagged with a disengagement violation";
+}
+
 function formatCelebrationEventLabel(eventType) {
   return String(eventType || "")
     .trim()
     .toLowerCase()
     .replaceAll("_", " ");
+}
+
+function extractChallengeActor(description) {
+  const match = String(description || "").match(/^(.+?) challenged/i);
+  return match?.[1]?.trim() || "";
+}
+
+function extractChallengeType(description) {
+  const match = String(description || "").match(/challenged\s*\(([^)]+)\)/i);
+  return normalizeChallengeText(match?.[1] || "");
+}
+
+function extractChallengeOutcome(description) {
+  const match = String(description || "").match(/call on the field was ([^:.,]+)/i);
+  return normalizeChallengeText(match?.[1] || "");
+}
+
+function normalizeChallengeText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function resolveChallengeBeneficiaryRole(eventType) {
+  return isPitcherBenefitCelebration(eventType) ? "pitcher" : "batter";
+}
+
+function isPitcherBenefitCelebration(eventType) {
+  const normalized = normalizeCelebrationEventType(eventType);
+  return (
+    isStrikeoutCelebration(normalized) ||
+    isDoublePlayCelebration(normalized) ||
+    isPickoffCelebration(normalized) ||
+    isCaughtStealingCelebration(normalized) ||
+    normalized.includes("force_out") ||
+    normalized.includes("field_out") ||
+    normalized.includes("groundout") ||
+    normalized.includes("flyout") ||
+    normalized.includes("lineout") ||
+    normalized.includes("pop_out")
+  );
+}
+
+function describeChallengeFinalCall(eventType) {
+  const normalized = normalizeCelebrationEventType(eventType);
+  if (!normalized) {
+    return "";
+  }
+
+  const directLabels = new Map([
+    ["walk", "the walk"],
+    ["strikeout", "the strikeout"],
+    ["single", "the single"],
+    ["double", "the double"],
+    ["triple", "the triple"],
+    ["home_run", "the home run"],
+    ["force_out", "the force out"],
+  ]);
+
+  return directLabels.get(normalized) || formatCelebrationEventLabel(normalized);
 }
 
 function baseLabelFromEventType(eventType) {
@@ -1557,10 +1857,10 @@ function buildFinalSummary(gameData, liveData) {
   return `${status}. ${away} ${awayRuns}, ${home} ${homeRuns}.`;
 }
 
-function buildFinalWinCelebration(gameData, selectedTeam, awayScore, homeScore) {
-  // Final-mode celebrations are intentionally winner-only and selected-team
-  // only. That lets the app celebrate a win once on the transition to `final`
-  // without replaying for losses or neutral results.
+function buildFinalGameCelebration(gameData, selectedTeam, awayScore, homeScore) {
+  // Final-mode celebrations are selected-team only. Wins should feel huge,
+  // while losses still get a deliberate end-screen so the dashboard does not
+  // just quietly drop into the final box score.
   const winnerSide = resolveWinningSide(awayScore, homeScore);
   if (!winnerSide) {
     return null;
@@ -1570,29 +1870,52 @@ function buildFinalWinCelebration(gameData, selectedTeam, awayScore, homeScore) 
   const homeEntry = gameData?.teams?.home || null;
   const awayTeam = awayEntry?.team || awayEntry;
   const homeTeam = homeEntry?.team || homeEntry;
+  const awayIdentity = normalizeTeamIdentity(awayTeam);
+  const homeIdentity = normalizeTeamIdentity(homeTeam);
   const winnerTeam = normalizeTeamIdentity(winnerSide === "away" ? awayTeam : homeTeam);
+  const loserTeam = normalizeTeamIdentity(winnerSide === "away" ? homeTeam : awayTeam);
+  const selectedTeamId = Number(selectedTeam?.id);
+  const selectedSide = selectedTeamId === Number(awayIdentity?.id)
+    ? "away"
+    : selectedTeamId === Number(homeIdentity?.id)
+      ? "home"
+      : null;
 
-  if (Number(winnerTeam?.id) !== Number(selectedTeam?.id)) {
+  if (!selectedSide) {
     return null;
   }
 
   const winnerScore = winnerSide === "away" ? awayScore : homeScore;
   const loserScore = winnerSide === "away" ? homeScore : awayScore;
   const gamePk = gameData?.game?.pk || gameData?.gamePk || "final";
+  const didSelectedTeamWin = winnerSide === selectedSide;
   const scoreLine = Number.isFinite(Number(winnerScore)) && Number.isFinite(Number(loserScore))
     ? `${winnerScore}-${loserScore}`
-    : "the win";
+    : didSelectedTeamWin ? "the win" : "the loss";
+
+  if (didSelectedTeamWin) {
+    return buildCelebrationPayload({
+      id: `final-win:${gamePk}:${scoreLine}`,
+      eventKey: "win_the_game",
+      label: "WIN THE GAME",
+      detail: `closes it out ${scoreLine}`,
+      actor: selectedTeam?.name || winnerTeam?.name || "Selected Team",
+      tone: "batter",
+      beneficiaryRole: "batter",
+      forceSelectedTeamBenefit: true,
+      teamLogoUrl: selectedTeam?.logoUrl || winnerTeam?.logoUrl || "",
+    });
+  }
 
   return buildCelebrationPayload({
-    id: `final-win:${gamePk}:${scoreLine}`,
-    eventKey: "win_the_game",
-    label: "WIN THE GAME",
-    detail: `closes it out ${scoreLine}`,
-    actor: selectedTeam?.name || winnerTeam?.name || "Selected Team",
-    tone: "batter",
-    beneficiaryRole: "batter",
-    forceSelectedTeamBenefit: true,
-    teamLogoUrl: selectedTeam?.logoUrl || winnerTeam?.logoUrl || "",
+    id: `final-loss:${gamePk}:${scoreLine}`,
+    eventKey: "lose_the_game",
+    label: "GAME OVER",
+    detail: `falls ${loserScore}-${winnerScore}`,
+    actor: selectedTeam?.name || loserTeam?.name || "Selected Team",
+    tone: "pitcher",
+    beneficiaryRole: "pitcher",
+    teamLogoUrl: selectedTeam?.logoUrl || loserTeam?.logoUrl || "",
   });
 }
 

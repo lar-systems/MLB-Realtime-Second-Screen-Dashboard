@@ -107,6 +107,8 @@ Recommended Pages settings:
 
 The dev-only smoke tooling lives under `tools/`, and `.assetsignore` keeps that folder out of the published asset bundle.
 
+The root also includes a tiny `build.json` manifest plus a `_headers` rule that marks it `no-store`. During an early-morning no-games window, the dashboard checks that manifest and refreshes itself if a newer deployed app version is available. That helps long-running kiosk tabs pick up new releases without forcing a refresh during live play.
+
 If you want Cloudflare Pages to ignore tooling-only commits, use Build watch paths like this:
 
 - Include paths: `*`

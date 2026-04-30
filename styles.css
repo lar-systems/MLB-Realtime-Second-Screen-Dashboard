@@ -152,6 +152,14 @@ select {
   padding: 12px 20px 24px;
 }
 
+html.is-kiosk-mode .app-shell,
+body.is-kiosk-mode .app-shell {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px 14px;
+}
+
 .topbar,
 .controls,
 .dashboard-grid,
@@ -460,6 +468,65 @@ select {
   --celebration-secondary-rgb: 255, 176, 112;
 }
 
+.celebration-card.is-loss-moment {
+  --celebration-flare-rgb: 113, 133, 156;
+  --celebration-secondary-rgb: 164, 178, 194;
+  border-color: rgba(121, 138, 160, 0.42);
+  background:
+    linear-gradient(180deg, rgba(7, 17, 31, 0.86), rgba(7, 17, 31, 0.94)),
+    rgba(8, 16, 29, 0.92);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.46),
+    0 0 0 1px rgba(164, 178, 194, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.celebration-card.is-loss-moment::before,
+.celebration-card.is-loss-moment::after {
+  opacity: 0.32;
+}
+
+.celebration-card.is-loss-moment::before {
+  animation: none;
+}
+
+.celebration-card.is-loss-moment::after {
+  animation: none;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(164, 178, 194, 0.06) 0 14px,
+      transparent 14px 34px
+    );
+  mix-blend-mode: normal;
+}
+
+.celebration-card.is-loss-moment .celebration-fx-burst,
+.celebration-card.is-loss-moment .celebration-fx-ring,
+.celebration-card.is-loss-moment .celebration-fx-particles,
+.celebration-card.is-loss-moment .celebration-fx-firework {
+  opacity: 0.14;
+  animation: none;
+}
+
+.celebration-card.is-loss-moment .celebration-label {
+  background: none;
+  color: #eef4fa;
+  -webkit-text-fill-color: #eef4fa;
+  -webkit-text-stroke: 5px rgba(34, 44, 58, 0.92);
+  text-shadow:
+    0 0 18px rgba(6, 13, 24, 0.4),
+    0 10px 24px rgba(0, 0, 0, 0.42);
+}
+
+.celebration-card.is-loss-moment .celebration-actor {
+  color: rgba(228, 236, 245, 0.9);
+}
+
+.celebration-card.is-loss-moment .celebration-detail {
+  color: rgba(173, 188, 205, 0.88);
+}
+
 .celebration-card.is-fan-moment::before,
 .celebration-card.is-fan-moment::after {
   opacity: 1;
@@ -475,6 +542,20 @@ select {
 
 .celebration-card.is-fan-moment[data-impact-context="go_ahead"]::after {
   animation-duration: 2.3s;
+}
+
+html.is-kiosk-mode .celebration-modal,
+body.is-kiosk-mode .celebration-modal {
+  padding: 12px;
+}
+
+html.is-kiosk-mode .celebration-card,
+body.is-kiosk-mode .celebration-card {
+  width: min(96vw, 2200px);
+  height: min(90vh, calc(100vh - 24px));
+  max-width: none;
+  max-height: calc(100vh - 24px);
+  padding: clamp(24px, 3.2vw, 64px);
 }
 
 .celebration-fx {
@@ -654,7 +735,8 @@ select {
 .celebration-card.is-fan-moment[data-hype-tier="2"] .celebration-fx-burst,
 .celebration-card.is-fan-moment[data-hype-tier="3"] .celebration-fx-burst,
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-fx-burst,
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-burst {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-burst,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-burst {
   opacity: 0.44;
   animation: celebrationBurstSpin 2.4s linear infinite;
 }
@@ -662,14 +744,16 @@ select {
 .celebration-card.is-fan-moment[data-hype-tier="2"] .celebration-fx-ring,
 .celebration-card.is-fan-moment[data-hype-tier="3"] .celebration-fx-ring,
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-fx-ring,
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-ring {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-ring,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-ring {
   opacity: 0.78;
   animation: celebrationRingExpand 1.55s ease-out infinite;
 }
 
 .celebration-card.is-fan-moment[data-hype-tier="3"] .celebration-fx-ring.is-secondary,
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-fx-ring.is-secondary,
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-ring.is-secondary {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-ring.is-secondary,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-ring.is-secondary {
   opacity: 0.5;
   animation: celebrationRingExpand 1.95s ease-out infinite 0.24s;
 }
@@ -681,7 +765,8 @@ select {
 
 .celebration-card.is-fan-moment[data-hype-tier="3"] .celebration-fx-particles,
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-fx-particles,
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-particles {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-particles,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-particles {
   opacity: 0.74;
   animation: celebrationParticlesDrift 2.8s linear infinite;
 }
@@ -692,12 +777,14 @@ select {
 }
 
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-fx-firework,
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-firework {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-firework,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-firework {
   opacity: 1;
   animation: celebrationFireworkPop 1.2s steps(2, end) infinite;
 }
 
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-firework {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-fx-firework,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-firework {
   animation-duration: 0.92s;
 }
 
@@ -717,7 +804,8 @@ select {
 }
 
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-label,
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-label {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-label,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-label {
   background: linear-gradient(
     180deg,
     #fffdf5 0%,
@@ -741,11 +829,13 @@ select {
     celebrationMegaFlash 1.35s steps(2, end) infinite;
 }
 
-.celebration-card.is-fan-moment[data-hype-tier="5"] {
+.celebration-card.is-fan-moment[data-hype-tier="5"],
+.celebration-card.is-fan-moment[data-hype-tier="6"] {
   animation: celebrationGrandSlamThump 1.08s ease-in-out infinite;
 }
 
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-label {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-label,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-label {
   letter-spacing: 0.05em;
   text-shadow:
     0 2px 0 rgba(255, 255, 255, 0.22),
@@ -755,10 +845,50 @@ select {
     0 16px 32px rgba(0, 0, 0, 0.54);
 }
 
+.celebration-card.is-fan-moment[data-hype-tier="6"] {
+  box-shadow:
+    0 34px 96px rgba(0, 0, 0, 0.58),
+    0 0 0 1px rgba(var(--celebration-secondary-rgb), 0.3),
+    0 0 72px rgba(var(--celebration-flare-rgb), 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-burst {
+  opacity: 0.56;
+  animation-duration: 1.85s;
+}
+
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-ring {
+  opacity: 0.92;
+  animation-duration: 1.2s;
+}
+
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-ring.is-secondary {
+  opacity: 0.68;
+  animation-duration: 1.54s;
+}
+
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-fx-particles {
+  opacity: 0.96;
+  animation-duration: 1.9s;
+}
+
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-label {
+  letter-spacing: 0.06em;
+  text-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.24),
+    0 0 42px rgba(255, 236, 136, 0.58),
+    0 0 82px rgba(255, 59, 48, 0.52),
+    8px 10px 0 rgba(12, 8, 10, 0.42),
+    0 18px 38px rgba(0, 0, 0, 0.58);
+}
+
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-detail,
 .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-actor,
 .celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-detail,
-.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-actor {
+.celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-actor,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-detail,
+.celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-actor {
   animation: celebrationSublineRise 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -3301,7 +3431,8 @@ select {
   }
 
   .celebration-card.is-fan-moment[data-hype-tier="4"] .celebration-label,
-  .celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-label {
+  .celebration-card.is-fan-moment[data-hype-tier="5"] .celebration-label,
+  .celebration-card.is-fan-moment[data-hype-tier="6"] .celebration-label {
     -webkit-text-stroke: 2.5px rgba(23, 20, 24, 0.94);
     text-shadow:
       0 1px 0 rgba(255, 255, 255, 0.18),

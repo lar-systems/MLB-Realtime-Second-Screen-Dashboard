@@ -11,12 +11,19 @@ const STORAGE_KEYS = {
   lastState: "mlb.lastState",
   debugVisible: "mlb.debugVisible",
   stateVersion: "mlb.stateVersion",
+  buildRefreshAttemptAt: "mlb.buildRefreshAttemptAt",
+  buildRefreshReloadTarget: "mlb.buildRefreshReloadTarget",
 };
 
 const URL_PARAMS = {
   team: "t",
   kiosk: "kiosk",
 };
+
+const BUILD_MANIFEST_URL = "build.json";
+const BUILD_REFRESH_WINDOW_START_HOUR = 6;
+const BUILD_REFRESH_WINDOW_END_HOUR = 9;
+const BUILD_REFRESH_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
 const TEAM_OPTIONS = [
   { id: 108, name: "Los Angeles Angels", abbr: "LAA" },
@@ -99,6 +106,18 @@ const TEAM_THEMES = new Map([
 const DEBUG_ACTION_EVENTS = [
   { key: "ball", label: "BALL", detail: "takes the pitch low", tone: "batter", actorRole: "batter" },
   { key: "strike", label: "STRIKE", detail: "steals a strike on the edge", tone: "pitcher", actorRole: "pitcher" },
+  { key: "batter_timeout", label: "BATTER TIMEOUT", detail: "calls time at the plate", tone: "batter", actorRole: "batter" },
+  { key: "pitcher_timeout", label: "PITCHER TIMEOUT", detail: "calls time on the mound", tone: "pitcher", actorRole: "pitcher" },
+  { key: "mound_visit", label: "MOUND VISIT", detail: "gets a quick visit on the mound", tone: "pitcher", actorRole: "pitcher" },
+  { key: "pitcher_step_off", label: "STEP OFF", detail: "steps off to reset", tone: "pitcher", actorRole: "pitcher" },
+  { key: "automatic_ball", label: "AUTOMATIC BALL", detail: "is charged with the automatic ball", tone: "batter", actorRole: "pitcher" },
+  { key: "automatic_strike", label: "AUTOMATIC STRIKE", detail: "takes the automatic strike", tone: "pitcher", actorRole: "batter" },
+  { key: "disengagement_violation", label: "DISENGAGEMENT", detail: "is tagged with a disengagement violation", tone: "pitcher", actorRole: "pitcher" },
+  { key: "review_pending", label: "MANAGER CHALLENGE", detail: "replay review is in progress", tone: "pitcher", actorRole: "pitcher" },
+  { key: "play_challenge", label: "PLAY CHALLENGE", detail: "replay review upholds the call", tone: "pitcher", actorRole: "pitcher" },
+  { key: "abs_challenge", label: "ABS CHALLENGE", detail: "pitch review confirms the call", tone: "pitcher", actorRole: "pitcher" },
+  { key: "win_the_game", label: "WIN THE GAME", detail: "closes it out 5-2", tone: "batter", actorRole: "team", forceSelectedTeamBenefit: true },
+  { key: "lose_the_game", label: "GAME OVER", detail: "falls 2-5", tone: "pitcher", actorRole: "team" },
   { key: "out", label: "OUT", detail: "records the out", tone: "pitcher", actorRole: "pitcher" },
   { key: "walk", label: "WALK", detail: "works the walk", tone: "batter", actorRole: "batter" },
   { key: "hit_by_pitch", label: "HIT BY PITCH", detail: "wears one to reach", tone: "batter", actorRole: "batter" },
@@ -124,6 +143,16 @@ const DEBUG_ACTION_EVENTS = [
 const CELEBRATION_HYPE_TIERS = new Map([
   ["ball", 1],
   ["strike", 1],
+  ["batter_timeout", 1],
+  ["pitcher_timeout", 1],
+  ["mound_visit", 1],
+  ["pitcher_step_off", 1],
+  ["automatic_ball", 1],
+  ["automatic_strike", 1],
+  ["disengagement_violation", 1],
+  ["review_pending", 1],
+  ["play_challenge", 1],
+  ["abs_challenge", 1],
   ["out", 1],
   ["walk", 1],
   ["hit_by_pitch", 1],
@@ -141,7 +170,8 @@ const CELEBRATION_HYPE_TIERS = new Map([
   ["double_play", 3],
   ["home_run", 4],
   ["grand_slam", 5],
-  ["win_the_game", 5],
+  ["win_the_game", 6],
+  ["lose_the_game", 1],
 ]);
 
 const CELEBRATION_CONTEXT_TIERS = new Map([
@@ -169,13 +199,17 @@ const state = {
     hideTimer: null,
     debugOverrideUntil: 0,
   },
+  buildRefresh: {
+    isChecking: false,
+    lastAttemptAt: 0,
+  },
   debug: {
     workerStatus: "not started",
     lastWorkerError: null,
     isVisible: false,
     actionEventIndex: -1,
     actionEventCounter: 0,
-    appVersion: "debug-2026-04-27-0004",
+    appVersion: "debug-2026-04-29-0005",
   },
 };
 
@@ -283,6 +317,8 @@ function init() {
   populateTeamSelect();
   applyTeamTheme(Number(elements.teamSelect.value));
   syncCachedStateVersion();
+  restoreBuildRefreshState();
+  syncBuildRefreshReloadTarget();
   applyKioskMode();
   bindEvents();
   restoreDebugVisibility();
@@ -513,6 +549,8 @@ function isKioskMode() {
 
 function applyKioskMode() {
   const kioskMode = isKioskMode();
+  document.documentElement.classList.toggle("is-kiosk-mode", kioskMode);
+  document.body.classList.toggle("is-kiosk-mode", kioskMode);
 
   if (elements.controls) {
     elements.controls.hidden = kioskMode;
@@ -651,6 +689,7 @@ function renderState(nextState) {
   renderActiveGames(nextState);
   syncCelebration(nextState);
   restartCountdown(nextState);
+  maybeCheckForBuildRefresh(nextState);
 }
 
 function applyTeamTheme(teamId) {
@@ -856,6 +895,10 @@ function buildDebugActionCelebration(eventConfig) {
 }
 
 function resolveDebugActionActor(actorRole) {
+  if (actorRole === "team") {
+    return state.current?.team?.name || "Selected Team";
+  }
+
   if (actorRole === "pitcher") {
     return state.current?.live?.pitcher?.name || "Current Pitcher";
   }
@@ -882,6 +925,7 @@ function showCelebration(celebration) {
 
   const media = resolveCelebrationMedia(celebration, state.current);
   const presentation = resolveCelebrationPresentation(celebration, state.current);
+  const timing = resolveCelebrationTiming(presentation);
 
   setImage(
     elements.celebrationTeamLogo,
@@ -908,7 +952,7 @@ function showCelebration(celebration) {
   elements.celebrationModal.classList.remove("is-visible", "is-exiting");
 
   if (celebration?.isDebug) {
-    state.celebration.debugOverrideUntil = Date.now() + 5200;
+    state.celebration.debugOverrideUntil = Date.now() + timing.hideDelayMs;
   }
 
   window.requestAnimationFrame(() => {
@@ -918,11 +962,11 @@ function showCelebration(celebration) {
   state.celebration.fadeTimer = window.setTimeout(() => {
     elements.celebrationModal.classList.remove("is-visible");
     elements.celebrationModal.classList.add("is-exiting");
-  }, 4500);
+  }, timing.fadeDelayMs);
 
   state.celebration.hideTimer = window.setTimeout(() => {
     hideCelebration(true);
-  }, 5000);
+  }, timing.hideDelayMs);
 }
 
 function hideCelebration(immediate = false) {
@@ -989,6 +1033,29 @@ function resolveCelebrationPresentation(celebration, currentState) {
     impactContext,
     hypeTier: isSelectedTeamBenefit ? Math.max(baseTier, contextTier) : 1,
     isFanMoment: isSelectedTeamBenefit && Math.max(baseTier, contextTier) > 1,
+    isLossMoment: eventKey === "lose_the_game",
+  };
+}
+
+function resolveCelebrationTiming(presentation) {
+  if (presentation?.isLossMoment) {
+    return {
+      fadeDelayMs: 6500,
+      hideDelayMs: 7500,
+    };
+  }
+
+  const isBigFanMoment = Boolean(presentation?.isFanMoment) && Number(presentation?.hypeTier || 1) >= 4;
+  if (isBigFanMoment) {
+    return {
+      fadeDelayMs: 10000,
+      hideDelayMs: 11000,
+    };
+  }
+
+  return {
+    fadeDelayMs: 6000,
+    hideDelayMs: 7000,
   };
 }
 
@@ -1016,6 +1083,7 @@ function applyCelebrationPresentation(card, presentation) {
   card.dataset.impactContext = presentation?.impactContext || "";
   card.dataset.hypeTier = String(presentation?.hypeTier || 1);
   card.classList.toggle("is-fan-moment", Boolean(presentation?.isFanMoment));
+  card.classList.toggle("is-loss-moment", Boolean(presentation?.isLossMoment));
 }
 
 function clearCelebrationPresentation(card) {
@@ -1026,7 +1094,7 @@ function clearCelebrationPresentation(card) {
   delete card.dataset.eventKey;
   delete card.dataset.impactContext;
   delete card.dataset.hypeTier;
-  card.classList.remove("is-fan-moment");
+  card.classList.remove("is-fan-moment", "is-loss-moment");
 }
 
 function normalizeCelebrationEventType(value) {
@@ -2269,6 +2337,134 @@ function setBanner(message, isError) {
   elements.statusBanner.classList.toggle("is-error", Boolean(isError));
 }
 
+// Morning build-refresh checks are intentionally conservative so kiosk and
+// always-on displays can pick up a newly deployed static build without
+// interrupting live games or reloading repeatedly.
+function maybeCheckForBuildRefresh(nextState) {
+  if (!shouldCheckForBuildRefresh(nextState)) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - state.buildRefresh.lastAttemptAt < BUILD_REFRESH_CHECK_INTERVAL_MS) {
+    return;
+  }
+
+  state.buildRefresh.lastAttemptAt = now;
+  localStorage.setItem(STORAGE_KEYS.buildRefreshAttemptAt, String(now));
+  void checkForBuildRefresh();
+}
+
+function shouldCheckForBuildRefresh(nextState) {
+  if (!nextState || state.buildRefresh.isChecking || navigator.onLine === false) {
+    return false;
+  }
+
+  if (!isWithinBuildRefreshWindow()) {
+    return false;
+  }
+
+  if (String(nextState.mode || "").toLowerCase() === "live") {
+    return false;
+  }
+
+  if (isMockSourceStatus(nextState.meta?.sourceStatus)) {
+    return false;
+  }
+
+  return getActiveGamesCount(nextState) === 0;
+}
+
+function isWithinBuildRefreshWindow(now = new Date()) {
+  const hour = now.getHours();
+  return hour >= BUILD_REFRESH_WINDOW_START_HOUR && hour < BUILD_REFRESH_WINDOW_END_HOUR;
+}
+
+function isMockSourceStatus(sourceStatus) {
+  return String(sourceStatus || "").toLowerCase().includes("mock");
+}
+
+function getActiveGamesCount(nextState) {
+  return Array.isArray(nextState?.activeGames) ? nextState.activeGames.length : 0;
+}
+
+async function checkForBuildRefresh() {
+  state.buildRefresh.isChecking = true;
+
+  try {
+    const manifest = await fetchBuildManifest();
+    const publishedVersion = normalizeBuildVersion(manifest?.appVersion);
+    const runningVersion = normalizeBuildVersion(state.debug.appVersion);
+
+    if (!publishedVersion || !runningVersion) {
+      return;
+    }
+
+    if (!isNewerBuildVersion(publishedVersion, runningVersion)) {
+      return;
+    }
+
+    const pendingReloadTarget = normalizeBuildVersion(
+      localStorage.getItem(STORAGE_KEYS.buildRefreshReloadTarget),
+    );
+    if (pendingReloadTarget === publishedVersion) {
+      return;
+    }
+
+    localStorage.setItem(STORAGE_KEYS.buildRefreshReloadTarget, publishedVersion);
+    window.location.reload();
+  } catch {
+    // Quietly retry on the next safe poll window. We do not want transient
+    // build-manifest failures to disrupt the scoreboard or spam the UI.
+  } finally {
+    state.buildRefresh.isChecking = false;
+  }
+}
+
+async function fetchBuildManifest() {
+  const url = new URL(BUILD_MANIFEST_URL, window.location.href);
+  url.searchParams.set("_", String(Date.now()));
+
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Build manifest request failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function normalizeBuildVersion(value) {
+  return String(value || "").trim() || "";
+}
+
+function isNewerBuildVersion(candidateVersion, currentVersion) {
+  const candidateDigits = extractBuildVersionDigits(candidateVersion);
+  const currentDigits = extractBuildVersionDigits(currentVersion);
+
+  if (candidateDigits !== null && currentDigits !== null) {
+    return candidateDigits > currentDigits;
+  }
+
+  return String(candidateVersion) > String(currentVersion);
+}
+
+function extractBuildVersionDigits(value) {
+  const digits = String(value || "").match(/\d+/g)?.join("");
+  if (!digits) {
+    return null;
+  }
+
+  try {
+    return BigInt(digits);
+  } catch {
+    return null;
+  }
+}
+
 function saveState(nextState) {
   localStorage.setItem(STORAGE_KEYS.lastState, JSON.stringify(nextState));
   localStorage.setItem(STORAGE_KEYS.stateVersion, state.debug.appVersion);
@@ -2292,6 +2488,21 @@ function syncCachedStateVersion() {
 
   localStorage.removeItem(STORAGE_KEYS.lastState);
   localStorage.setItem(STORAGE_KEYS.stateVersion, state.debug.appVersion);
+}
+
+function restoreBuildRefreshState() {
+  const storedAttemptAt = Number(localStorage.getItem(STORAGE_KEYS.buildRefreshAttemptAt));
+  state.buildRefresh.lastAttemptAt = Number.isFinite(storedAttemptAt) ? storedAttemptAt : 0;
+}
+
+function syncBuildRefreshReloadTarget() {
+  const pendingReloadTarget = normalizeBuildVersion(
+    localStorage.getItem(STORAGE_KEYS.buildRefreshReloadTarget),
+  );
+
+  if (pendingReloadTarget && pendingReloadTarget === normalizeBuildVersion(state.debug.appVersion)) {
+    localStorage.removeItem(STORAGE_KEYS.buildRefreshReloadTarget);
+  }
 }
 
 function formatDateTime(value) {
